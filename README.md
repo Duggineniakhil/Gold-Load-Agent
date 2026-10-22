@@ -26,6 +26,12 @@ The migration stores loan scheme rates as basis points, creates the Lead table w
 
 The API database test helper runs migrations against `TEST_DATABASE_URL`, then truncates test tables and resets the application ID sequence between tests. It refuses to use a database whose name does not end in `_test`.
 
+## Exact money calculations
+
+`apps/api/src/domain/money.ts` contains pure functions with no Express or Prisma dependencies. Weights are parsed from decimal strings into integer milligrams, gold values use integer paise arithmetic, and eligible loans are floored from the exact weight and karat fraction without intermediate value rounding. Display-only pure-gold grams use three decimal places with half-up rounding. `formatINR` formats whole-rupee values with Indian digit grouping.
+
+The money tests cover parsing edge cases, the assignment's EMI and Bullet examples, fractional-karat flooring, LTV capping, and fast-check properties for whole-rupee loans, the 75% limit, and monotonicity by weight.
+
 ## Workspace commands
 
 - `npm run dev` starts the API and web development servers together.
