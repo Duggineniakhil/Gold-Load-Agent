@@ -31,25 +31,46 @@ export const netWeightGramsSchema = z.union([z.string(), z.number().finite()]).s
 export const karatSchema = z.union([z.literal(18), z.literal(22), z.literal(24)]);
 export const planIdSchema = z.string().min(1);
 
-export const quoteRequestSchema = z
-  .object({
-    netWeightGrams: netWeightGramsSchema,
-    grossWeightGrams: grossWeightGramsSchema,
-    karat: karatSchema,
-  })
-  .superRefine((value, ctx) => {
+function validateWeightOrder(
+  value: { netWeightGrams: string | number; grossWeightGrams: string | number },
+  ctx: z.RefinementCtx,
+) {
     const toMg = (weight: string | number) => {
-      const [whole = '0', fraction = ''] = String(weight).split('.');
+      const text = String(weight);
+      if (!gramsPattern.test(text)) return null;
+      const [whole = '0', fraction = ''] = text.split('.');
       return BigInt(whole) * 1000n + BigInt(fraction.padEnd(3, '0') || '0');
     };
-    if (toMg(value.netWeightGrams) > toMg(value.grossWeightGrams)) {
+    const netWeightMg = toMg(value.netWeightGrams);
+    const grossWeightMg = toMg(value.grossWeightGrams);
+    if (netWeightMg !== null && grossWeightMg !== null && netWeightMg > grossWeightMg) {
       ctx.addIssue({
         code: 'custom',
         path: ['netWeightGrams'],
         message: 'Net weight cannot exceed gross weight.',
       });
     }
-  });
+}
+
+export const quoteRequestSchema = z
+  .object({
+    netWeightGrams: netWeightGramsSchema,
+    grossWeightGrams: grossWeightGramsSchema,
+    karat: karatSchema,
+  })
+  .superRefine(validateWeightOrder);
+
+export const leadRequestSchema = z
+  .object({
+    name: nameSchema,
+    mobileNumber: mobileNumberSchema,
+    grossWeightGrams: grossWeightGramsSchema,
+    netWeightGrams: netWeightGramsSchema,
+    karat: karatSchema,
+    planId: planIdSchema,
+  })
+  .superRefine(validateWeightOrder);
 
 export type QuoteRequest = z.infer<typeof quoteRequestSchema>;
+export type LeadRequest = z.infer<typeof leadRequestSchema>;
 export type RepaymentType = 'BULLET' | 'EMI';

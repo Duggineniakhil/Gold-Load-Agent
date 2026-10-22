@@ -2,16 +2,20 @@ import { randomUUID } from 'node:crypto';
 import express from 'express';
 import pinoHttp from 'pino-http';
 import { ZodError } from 'zod';
-import { quoteRequestSchema, API_PREFIX } from '@tglobal/shared';
+import { leadRequestSchema, planIdSchema, quoteRequestSchema, API_PREFIX } from '@tglobal/shared';
+import { z } from 'zod';
 import type { Logger } from 'pino';
+import type { LeadRepository } from './repositories/lead-repository.js';
 import type { LoanSchemeRepository } from './repositories/loan-scheme-repository.js';
 import { listActiveLoanSchemes } from './services/loan-scheme-service.js';
+import { listLeads, submitLead } from './services/lead-service.js';
 import { createQuotes } from './services/quote-service.js';
 import { AppError, NotFoundError, ValidationError } from './errors.js';
 import { logger as defaultLogger } from './logger.js';
 
 export type AppDependencies = {
   loanSchemeRepository: LoanSchemeRepository;
+  leadRepository: LeadRepository;
   goldRatePaisePerGram: bigint;
   logger?: Logger;
 };
@@ -57,6 +61,38 @@ export function createApp(deps: AppDependencies) {
     );
   });
 
+  app.post(`${API_PREFIX}/leads`, async (request, response) => {
+    const parsed = leadRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      const fields = parsed.error.issues.map((issue) => ({
+        field: issue.path.map(String).join('.'),
+        message: issue.message,
+      }));
+      throw new ValidationError('Request validation failed.', fields);
+    }
+
+    response.status(201).json(
+      await submitLead(parsed.data, deps.leadRepository, deps.goldRatePaisePerGram),
+    );
+  });
+
+  app.get(`${API_PREFIX}/leads`, async (request, response) => {
+    const querySchema = z.object({
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+      cursor: z.string().min(1).optional(),
+      planId: planIdSchema.optional(),
+    });
+    const parsed = querySchema.safeParse(request.query);
+    if (!parsed.success) {
+      const fields = parsed.error.issues.map((issue) => ({
+        field: issue.path.map(String).join('.'),
+        message: issue.message,
+      }));
+      throw new ValidationError('Request validation failed.', fields);
+    }
+    response.json(await listLeads(deps.leadRepository, parsed.data));
+  });
+
   app.use((_request, _response, next) => next(new NotFoundError()));
 
   app.use(
@@ -72,6 +108,7 @@ export function createApp(deps: AppDependencies) {
             code: error.code,
             message: error.message,
             fields: error.fields,
+            ...error.extra,
           },
         });
         return;

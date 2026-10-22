@@ -26,6 +26,13 @@ const seededSchemes: LoanSchemeRecord[] = [
 function makeApp(findActive = async () => seededSchemes) {
   return createApp({
     loanSchemeRepository: { findActive },
+    leadRepository: {
+      findScheme: async () => null,
+      withMobileLock: async () => {
+        throw new Error('No lead repository configured for this test.');
+      },
+      list: async () => [],
+    },
     goldRatePaisePerGram: 700000n,
     logger: pino({ enabled: false }),
   });
