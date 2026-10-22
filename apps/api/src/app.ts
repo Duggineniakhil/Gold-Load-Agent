@@ -102,6 +102,7 @@ export function createApp(deps: AppDependencies) {
       response: express.Response,
       _next: express.NextFunction,
     ) => {
+      void _next;
       if (error instanceof AppError) {
         response.status(error.statusCode).json({
           error: {

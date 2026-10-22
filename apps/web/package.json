@@ -7,15 +7,21 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "screenshot": "node scripts/capture-design.mjs",
     "test": "vitest run"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
     "@tglobal/shared": "*",
     "@vitejs/plugin-react": "^4.7.0",
+    "motion": "^14.6.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.1.16",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",

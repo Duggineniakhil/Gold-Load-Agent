@@ -6,4 +6,6 @@ coverage/
 !.env.example
 claude.md
 .vite/
+.playwright-browsers/
+artifacts/
 *.log
