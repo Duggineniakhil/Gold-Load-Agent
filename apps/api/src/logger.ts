@@ -8,6 +8,7 @@ export const logger = pino({
       'mobileNumber',
       '*.mobileNumber',
       'req.body.mobileNumber',
+      'req.headers.x-mobile-number',
     ],
     censor: '[REDACTED]',
   },

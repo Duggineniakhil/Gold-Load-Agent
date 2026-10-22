@@ -18,6 +18,17 @@ Open <http://localhost:5173>. The Vite development server proxies `/api` request
 
 Copy `.env.example` to `.env` to customize local settings. Defaults target the PostgreSQL databases created by Compose: `tglobal` for development and `tglobal_test` for tests. The test database is created by the init script on the first startup of a fresh PostgreSQL volume.
 
+## API foundation
+
+The Express app is created with `createApp(deps)` so repositories and the gold rate can be injected in tests. It assigns a request ID, uses pino-http logging with sensitive fields redacted, limits JSON request bodies, and returns one JSON error shape for validation failures, malformed JSON, unknown routes, and unexpected errors.
+
+Shared Zod schemas in `packages/shared/src/schemas.ts` validate Unicode names, Indian mobile numbers, weights in grams (up to three decimal places), and karat values. The API and web workspace can import these from `@tglobal/shared`.
+
+- `GET /api/v1/loan-schemes` returns active schemes with interest and LTV percentages.
+- `POST /api/v1/quotes` accepts `netWeightGrams`, `grossWeightGrams`, and `karat`; it writes no data and returns the configured gold rate, pure-gold weight, gold value in paise, and eligible loan amounts for each active scheme.
+
+API Supertest coverage includes the seeded schemes, assignment quote examples, request validation, malformed JSON, unknown routes, and generic internal errors.
+
 ## Database
 
 Prisma schema and migrations are in `apps/api/prisma`. `npm run db:migrate` applies pending migrations and `npm run db:seed` idempotently upserts the Bullet Repayment and Monthly EMI schemes.
