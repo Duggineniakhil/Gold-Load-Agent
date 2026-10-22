@@ -43,7 +43,11 @@ export type LeadSummary = {
   createdAt: string;
 };
 
-export type LeadPage = { items: LeadSummary[]; nextCursor: string | null };
+export type LeadPage = {
+  items: LeadSummary[];
+  nextCursor: string | null;
+  filterSummary: string;
+};
 export const LEADS_PAGE_SIZE = 20;
 
 export type SubmittedLead = {
@@ -98,6 +102,11 @@ export type LeadStats = {
 };
 
 export type FieldError = { field: string; message: string };
+export type AppraisalSlipExtraction = {
+  grossWeightGrams: string | null;
+  netWeightGrams: string | null;
+  karat: 18 | 22 | 24 | null;
+};
 
 const passcodeKey = 'tglobal.adminPasscode';
 
@@ -175,6 +184,8 @@ export const api = {
   goldRate: () => request<GoldRate>('/gold-rate'),
   repaymentEstimate: (input: RepaymentEstimateRequest, signal?: AbortSignal) =>
     request<RepaymentEstimate>('/repayment-estimates', postJson(input, signal)),
+  extractAppraisalSlip: (imageDataUrl: string) =>
+    request<AppraisalSlipExtraction>('/appraisal-slip/extract', postJson({ imageDataUrl })),
   leadStats: (planId: string) =>
     request<LeadStats>(`/leads/stats${planId ? `?planId=${encodeURIComponent(planId)}` : ''}`, {
       headers: adminHeaders(),
@@ -188,10 +199,19 @@ export const api = {
     request<LeadAudit>(`/leads/${encodeURIComponent(applicationId)}/audit`, {
       headers: adminHeaders(),
     }),
-  leads: ({ planId, cursor }: { planId: string; cursor?: string | null }) => {
+  leads: ({
+    planId,
+    cursor,
+    filter,
+  }: {
+    planId: string;
+    cursor?: string | null;
+    filter?: string;
+  }) => {
     const query = new URLSearchParams({ limit: String(LEADS_PAGE_SIZE) });
     if (planId) query.set('planId', planId);
     if (cursor) query.set('cursor', cursor);
+    if (filter) query.set('filter', filter);
     return request<LeadPage>(`/leads?${query}`, { headers: adminHeaders() });
   },
 };

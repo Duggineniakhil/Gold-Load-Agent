@@ -1790,6 +1790,36 @@ p {
   background: var(--bg-soft);
   font-size: 15px;
 }
+.register__query {
+  padding: 16px 22px;
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.register__query label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.register__query > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.register__query input {
+  flex: 1 1 320px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--bg-soft);
+}
+.register__query p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
 .register__state {
   margin: 0;
   padding: 28px 22px;
@@ -1922,6 +1952,9 @@ p {
   }
   .register__filter select {
     flex: 1;
+  }
+  .register__query {
+    padding: 14px 16px;
   }
   .register__table thead {
     position: absolute;
@@ -2830,4 +2863,80 @@ p {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+/* Appraisal-slip reading */
+.appraisal-upload {
+  margin: 18px 0 26px;
+  padding: 18px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--gold-wash);
+}
+.appraisal-upload h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.appraisal-upload p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.appraisal-upload__file {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--card);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.appraisal-upload__file input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+.appraisal-upload__selection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.appraisal-upload__selection > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.appraisal-upload .appraisal-upload__notice {
+  font-size: 12px;
+}
+.appraisal-upload__result {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.appraisal-upload__result dl {
+  margin: 12px 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.appraisal-upload__result dl div {
+  display: grid;
+  gap: 4px;
+}
+.appraisal-upload__result dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.appraisal-upload__result dd {
+  margin: 0;
+  font-weight: 600;
 }

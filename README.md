@@ -6,17 +6,17 @@ How it fits together is in [ARCHITECTURE.md](ARCHITECTURE.md). AI tools, exact p
 
 ## Tech choices and why
 
-| Choice | Why |
-| --- | --- |
-| npm workspaces: `apps/api`, `apps/web`, `packages/shared` | One install. The shared package holds the Zod schemas, so the API, the form and the agent tools validate with exactly the same rules. |
-| Node 20 + Express 5 + TypeScript | Express 5 forwards async errors to the error handler, so every failure returns the same JSON error shape. |
-| Zod | Request validation and inferred types from one definition. Field errors map directly to `fields[]`. |
-| PostgreSQL + Prisma | Migrations and a typed client. Money and weights are integers (paise as `BIGINT`, milligrams as `INT`), and `CHECK` constraints back up the rules in the database. |
-| Integer maths with `BigInt` | No floats anywhere. The loan is `floor(goldValue × min(maxLtv, 75%))` in whole rupees, computed from the exact `karat/24` fraction, never from a rounded pure-gold figure. |
-| PostgreSQL advisory locks | The 7-day duplicate check and the idempotency check hold under concurrent requests without a uniqueness trick. |
-| React + Vite + `motion` | A fast single-page app. The UI calls the API for every figure and never computes money itself. |
-| Vitest + Supertest + Playwright | Unit, API and database tests in one runner, plus a Playwright walkthrough at 375, 768 and 1440 px. |
-| Gemini, with Groq as a fallback, via OpenAI-compatible APIs and plain `fetch` | Free tiers with tool calling. If Gemini is busy, Groq answers instead, and there is no SDK lock-in: any OpenAI-compatible provider works by changing env vars. |
+| Choice                                                                        | Why                                                                                                                                                                        |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| npm workspaces: `apps/api`, `apps/web`, `packages/shared`                     | One install. The shared package holds the Zod schemas, so the API, the form and the agent tools validate with exactly the same rules.                                      |
+| Node 20 + Express 5 + TypeScript                                              | Express 5 forwards async errors to the error handler, so every failure returns the same JSON error shape.                                                                  |
+| Zod                                                                           | Request validation and inferred types from one definition. Field errors map directly to `fields[]`.                                                                        |
+| PostgreSQL + Prisma                                                           | Migrations and a typed client. Money and weights are integers (paise as `BIGINT`, milligrams as `INT`), and `CHECK` constraints back up the rules in the database.         |
+| Integer maths with `BigInt`                                                   | No floats anywhere. The loan is `floor(goldValue × min(maxLtv, 75%))` in whole rupees, computed from the exact `karat/24` fraction, never from a rounded pure-gold figure. |
+| PostgreSQL advisory locks                                                     | The 7-day duplicate check and the idempotency check hold under concurrent requests without a uniqueness trick.                                                             |
+| React + Vite + `motion`                                                       | A fast single-page app. The UI calls the API for every figure and never computes money itself.                                                                             |
+| Vitest + Supertest + Playwright                                               | Unit, API and database tests in one runner, plus a Playwright walkthrough at 375, 768 and 1440 px.                                                                         |
+| Gemini, with Groq as a fallback, via OpenAI-compatible APIs and plain `fetch` | Free tiers with tool calling. If Gemini is busy, Groq answers instead, and there is no SDK lock-in: any OpenAI-compatible provider works by changing env vars.             |
 
 ## Prerequisites
 
@@ -25,6 +25,20 @@ How it fits together is in [ARCHITECTURE.md](ARCHITECTURE.md). AI tools, exact p
 - Optional: a Gemini API key, for Loan Assist and the live evals
 
 ## Setup
+
+### Run the full app with Docker Compose
+
+From a fresh clone, optionally copy `.env.example` to `.env` and add an LLM key for Loan Assist:
+
+```bash
+docker compose up --build
+```
+
+Compose starts PostgreSQL, applies migrations and seeds plans before starting the API, then serves the web app through Nginx. Open <http://localhost:5173>; the API health endpoint is <http://localhost:3001/api/v1/health>. The API and database ports can be changed with `API_PORT` and `POSTGRES_PORT`; the web port can be changed with `WEB_PORT`. Loan Assist and appraisal-slip extraction need a server-side `LLM_API_KEY` (or fallback key); the rest of the app works without one.
+
+Stop the containers with `docker compose down`. Database data persists in the `postgres_data` volume.
+
+### Local development
 
 From a fresh clone:
 
@@ -49,23 +63,24 @@ The pages are `/` (home), `/apply` (3-step application), `/calculator` (loan and
 
 ## Environment variables
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `POSTGRES_PORT` | `5432` | Host port for the Compose database. |
-| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/tglobal` | Development database. |
-| `TEST_DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/tglobal_test` | Test and eval database. The name must end in `_test`, or the tests refuse to run. |
-| `API_PORT` | `3001` | API port. The Vite proxy expects 3001. |
-| `GOLD_RATE_24K_PAISE_PER_GRAM` | `700000` | Mock 24K rate: ₹7,000 per gram. |
-| `LLM_API_KEY` | empty | LLM provider key. Empty disables Loan Assist and skips the evals. |
-| `LLM_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai/` | Any OpenAI-compatible base URL, ending in `/`. |
-| `LLM_MODEL` | `gemini-3.5-flash-lite` | Model used by Loan Assist. |
-| `LLM_TIMEOUT_MS` | `30000` | Per-request timeout. 408, 429, 500, 502, 503 and 504 responses are retried 3 times with backoff (once when a fallback is set). |
-| `LLM_FALLBACK_API_KEY` | empty | Optional fallback provider key, used only when the primary is unavailable. On its own, it also enables Loan Assist. |
-| `LLM_FALLBACK_BASE_URL` | `https://api.groq.com/openai/v1/` | Fallback OpenAI-compatible base URL. |
-| `LLM_FALLBACK_MODEL` | `openai/gpt-oss-20b` | Fallback model. |
-| `RATE_LIMIT_LEADS_PER_MINUTE` | `20` | Per-IP limit on `POST /leads`; `0` turns it off. |
-| `RATE_LIMIT_AGENT_PER_MINUTE` | `30` | Per-IP limit on the Loan Assist endpoints; `0` turns it off. |
-| `ADMIN_PASSCODE` | empty | When set, the admin page and admin endpoints require it (sent as `X-Admin-Passcode`). Empty leaves them open for local use. |
+| Variable                       | Default                                                      | Purpose                                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `POSTGRES_PORT`                | `5432`                                                       | Host port for the Compose database.                                                                                            |
+| `DATABASE_URL`                 | `postgresql://postgres:postgres@localhost:5432/tglobal`      | Development database.                                                                                                          |
+| `TEST_DATABASE_URL`            | `postgresql://postgres:postgres@localhost:5432/tglobal_test` | Test and eval database. The name must end in `_test`, or the tests refuse to run.                                              |
+| `API_PORT`                     | `3001`                                                       | API port. The Vite proxy expects 3001.                                                                                         |
+| `WEB_PORT`                     | `5173`                                                       | Host port for the Compose web app.                                                                                             |
+| `GOLD_RATE_24K_PAISE_PER_GRAM` | `700000`                                                     | Mock 24K rate: ₹7,000 per gram.                                                                                                |
+| `LLM_API_KEY`                  | empty                                                        | LLM provider key. Empty disables Loan Assist and skips the evals.                                                              |
+| `LLM_BASE_URL`                 | `https://generativelanguage.googleapis.com/v1beta/openai/`   | Any OpenAI-compatible base URL, ending in `/`.                                                                                 |
+| `LLM_MODEL`                    | `gemini-3.5-flash-lite`                                      | Model used by Loan Assist.                                                                                                     |
+| `LLM_TIMEOUT_MS`               | `30000`                                                      | Per-request timeout. 408, 429, 500, 502, 503 and 504 responses are retried 3 times with backoff (once when a fallback is set). |
+| `LLM_FALLBACK_API_KEY`         | empty                                                        | Optional fallback provider key, used only when the primary is unavailable. On its own, it also enables Loan Assist.            |
+| `LLM_FALLBACK_BASE_URL`        | `https://api.groq.com/openai/v1/`                            | Fallback OpenAI-compatible base URL.                                                                                           |
+| `LLM_FALLBACK_MODEL`           | `openai/gpt-oss-20b`                                         | Fallback model.                                                                                                                |
+| `RATE_LIMIT_LEADS_PER_MINUTE`  | `20`                                                         | Per-IP limit on `POST /leads`; `0` turns it off.                                                                               |
+| `RATE_LIMIT_AGENT_PER_MINUTE`  | `30`                                                         | Per-IP limit on the Loan Assist endpoints; `0` turns it off.                                                                   |
+| `ADMIN_PASSCODE`               | empty                                                        | When set, the admin page and admin endpoints require it (sent as `X-Admin-Passcode`). Empty leaves them open for local use.    |
 
 ## Tests and evals
 
@@ -75,7 +90,7 @@ PostgreSQL must be running (`docker compose up -d db`). Tests run the migrations
 npm test
 ```
 
-There are 132 tests:
+There are 141 tests:
 
 - **Maths:** spec cases 1–3, flooring, the 75% cap, and property tests.
 - **Validation:** 400 errors, including spec cases 4–5.
@@ -100,7 +115,7 @@ There are 132 tests:
 npm run eval
 ```
 
-This runs 7 conversations against the live model and the test database, checking behaviour (tools called, summaries, stored leads) rather than wording:
+This runs 10 conversations against the live model and the test database, checking behaviour (tools called, summaries, stored leads) rather than wording:
 
 1. Happy path to submission
 2. Missing field
@@ -109,6 +124,9 @@ This runs 7 conversations against the live model and the test database, checking
 5. Off-topic request
 6. Prompt injection
 7. Hinglish
+8. Cancelled application is never filed
+9. Asks for purity before quoting when it is missing
+10. Checks for a recent application without filing a new one
 
 Without an LLM key, it prints "Skipped" and exits 0. Expect 15–90 seconds per conversation on the free tier.
 
@@ -118,20 +136,22 @@ Other checks: `npm run typecheck` and `npm run lint`. GitHub Actions ([`.github/
 
 Base path: `/api/v1`. Every error has the same shape: `{ "error": { "code", "message", "fields": [{ "field", "message" }] } }`. That includes malformed JSON, unknown routes, rate limits (`429 RATE_LIMITED` with `Retry-After`) and 500s, which never include a stack trace. Mobile numbers are always masked (`9876XXXX10`).
 
-| Method and path | Purpose |
-| --- | --- |
-| `GET /loan-schemes` | Active plans |
-| `POST /quotes` | Quote for every plan (no database write) |
-| `POST /leads` | Validate, recompute, de-duplicate and store; optional `Idempotency-Key` header |
-| `POST /repayment-estimates` | Calculator: EMI or bullet repayment for a loan amount on a plan, in exact paise |
-| `GET /leads?planId=&limit=&cursor=` | Admin: newest first, masked, cursor pagination |
-| `GET /leads/stats?planId=` | Admin: count per status and total eligible loans |
-| `PATCH /leads/:applicationId/status` | Admin: status workflow step, audited |
-| `GET /leads/:applicationId/audit` | Admin: status history |
-| `GET /gold-rate` | Cached 24K rate (60 s) |
-| `POST /agent/messages` | Send a message to Loan Assist |
-| `POST /agent/sessions/:sessionId/confirm` | Confirm or cancel the prepared application |
-| `GET /health` | Liveness check |
+Loan Assist messages can also be sent to `POST /agent/messages/stream`, which streams verified reply chunks as Server-Sent Events. `POST /appraisal-slip/extract` accepts an image data URL and uses the configured server-side LLM to suggest weights and karat; the borrower must review and apply the suggestions in the form.
+
+| Method and path                           | Purpose                                                                         |
+| ----------------------------------------- | ------------------------------------------------------------------------------- |
+| `GET /loan-schemes`                       | Active plans                                                                    |
+| `POST /quotes`                            | Quote for every plan (no database write)                                        |
+| `POST /leads`                             | Validate, recompute, de-duplicate and store; optional `Idempotency-Key` header  |
+| `POST /repayment-estimates`               | Calculator: EMI or bullet repayment for a loan amount on a plan, in exact paise |
+| `GET /leads?planId=&limit=&cursor=`       | Admin: newest first, masked, cursor pagination                                  |
+| `GET /leads/stats?planId=`                | Admin: count per status and total eligible loans                                |
+| `PATCH /leads/:applicationId/status`      | Admin: status workflow step, audited                                            |
+| `GET /leads/:applicationId/audit`         | Admin: status history                                                           |
+| `GET /gold-rate`                          | Cached 24K rate (60 s)                                                          |
+| `POST /agent/messages`                    | Send a message to Loan Assist                                                   |
+| `POST /agent/sessions/:sessionId/confirm` | Confirm or cancel the prepared application                                      |
+| `GET /health`                             | Liveness check                                                                  |
 
 **Quote** (spec case 1):
 
@@ -146,8 +166,18 @@ curl -s -X POST localhost:3001/api/v1/quotes -H 'content-type: application/json'
   "pureGoldGrams": "41.250",
   "goldValuePaise": 28875000,
   "quotes": [
-    { "planId": "PLAN_BULLET_01", "name": "Bullet Repayment", "ltvAppliedPercent": 70, "eligibleLoanPaise": 20212500 },
-    { "planId": "PLAN_EMI_01", "name": "Monthly EMI", "ltvAppliedPercent": 75, "eligibleLoanPaise": 21656200 }
+    {
+      "planId": "PLAN_BULLET_01",
+      "name": "Bullet Repayment",
+      "ltvAppliedPercent": 70,
+      "eligibleLoanPaise": 20212500
+    },
+    {
+      "planId": "PLAN_EMI_01",
+      "name": "Monthly EMI",
+      "ltvAppliedPercent": 75,
+      "eligibleLoanPaise": 21656200
+    }
   ]
 }
 ```
@@ -177,8 +207,23 @@ curl -s -X POST localhost:3001/api/v1/leads -H 'content-type: application/json' 
   "applicationId": "GL-1002",
   "status": "SUBMITTED",
   "createdAt": "2026-10-22T17:03:58.733Z",
-  "lead": { "applicationId": "GL-1002", "name": "Ravi Kumar", "mobileNumber": "9876XXXX10", "netWeightGrams": 45, "eligibleLoanPaise": 21656200, "status": "SUBMITTED" },
-  "quote": { "goldRatePerGram": 7000, "pureGoldGrams": "41.250", "goldValuePaise": 28875000, "planId": "PLAN_EMI_01", "planName": "Monthly EMI", "ltvAppliedPercent": 75, "eligibleLoanPaise": 21656200 }
+  "lead": {
+    "applicationId": "GL-1002",
+    "name": "Ravi Kumar",
+    "mobileNumber": "9876XXXX10",
+    "netWeightGrams": 45,
+    "eligibleLoanPaise": 21656200,
+    "status": "SUBMITTED"
+  },
+  "quote": {
+    "goldRatePerGram": 7000,
+    "pureGoldGrams": "41.250",
+    "goldValuePaise": 28875000,
+    "planId": "PLAN_EMI_01",
+    "planName": "Monthly EMI",
+    "ltvAppliedPercent": 75,
+    "eligibleLoanPaise": 21656200
+  }
 }
 ```
 
@@ -211,7 +256,12 @@ curl -s -X PATCH localhost:3001/api/v1/leads/GL-1002/status -H 'content-type: ap
   "applicationId": "GL-1002",
   "status": "UNDER_REVIEW",
   "updatedAt": "2026-10-22T17:04:06.098Z",
-  "entry": { "from": "SUBMITTED", "to": "UNDER_REVIEW", "actor": "Asha Rao", "at": "2026-10-22T17:04:06.115Z" }
+  "entry": {
+    "from": "SUBMITTED",
+    "to": "UNDER_REVIEW",
+    "actor": "Asha Rao",
+    "at": "2026-10-22T17:04:06.115Z"
+  }
 }
 ```
 
@@ -220,7 +270,14 @@ An illegal move returns `409 INVALID_TRANSITION` with `"from": "UNDER_REVIEW"`, 
 **Gold rate:**
 
 ```json
-{ "ratePerGram24k": 7000, "ratePaisePerGram24k": 700000, "currency": "INR", "source": "mock", "asOf": "2026-10-22T17:03:58.270Z", "cachedUntil": "2026-10-22T17:04:58.270Z" }
+{
+  "ratePerGram24k": 7000,
+  "ratePaisePerGram24k": 700000,
+  "currency": "INR",
+  "source": "mock",
+  "asOf": "2026-10-22T17:03:58.270Z",
+  "cachedUntil": "2026-10-22T17:04:58.270Z"
+}
 ```
 
 **Loan Assist:** `POST /agent/messages` with `{"message": "I have 45 g net and 50 g gross of 22 carat gold. How much can I get?"}` returns:
@@ -229,7 +286,10 @@ An illegal move returns `409 INVALID_TRANSITION` with `"from": "UNDER_REVIEW"`, 
 {
   "sessionId": "fe4a5448-5f02-4fa9-a011-f16e0b52518a",
   "reply": "Here are the details for your 22-karat gold (50 grams gross, 45 grams net):\n- Pure gold: 41.250 grams\n- Gold value: ₹2,88,750 … Monthly EMI … Eligible loan: ₹2,16,562 …",
-  "toolEvents": [{ "tool": "calculate_quote", "ok": true }, { "tool": "get_loan_schemes", "ok": true }],
+  "toolEvents": [
+    { "tool": "calculate_quote", "ok": true },
+    { "tool": "get_loan_schemes", "ok": true }
+  ],
   "pendingConfirmation": null,
   "submission": null
 }
@@ -247,28 +307,28 @@ Loan Assist uses **Gemini 3.5 Flash Lite** (free tier), with **Groq `openai/gpt-
 
 **To swap providers,** change `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` (or the `LLM_FALLBACK_*` set) in `.env`. Any OpenAI-compatible endpoint with tool calling works:
 
-| Provider | `LLM_BASE_URL` | `LLM_MODEL` (example) |
-| --- | --- | --- |
-| OpenAI | `https://api.openai.com/v1/` | `gpt-4o-mini` |
-| Groq | `https://api.groq.com/openai/v1/` | `openai/gpt-oss-20b` |
-| Ollama (local) | `http://localhost:11434/v1/` | `qwen2.5:7b`; set `LLM_API_KEY` to any non-empty value |
+| Provider       | `LLM_BASE_URL`                    | `LLM_MODEL` (example)                                  |
+| -------------- | --------------------------------- | ------------------------------------------------------ |
+| OpenAI         | `https://api.openai.com/v1/`      | `gpt-4o-mini`                                          |
+| Groq           | `https://api.groq.com/openai/v1/` | `openai/gpt-oss-20b`                                   |
+| Ollama (local) | `http://localhost:11434/v1/`      | `qwen2.5:7b`; set `LLM_API_KEY` to any non-empty value |
 
 Gemini and Groq have been tested; the other rows are examples. Run `npm run eval` after swapping to check the new model's behaviour.
 
 ## Bonuses attempted
 
-| Bonus | Status |
-| --- | --- |
-| Spec case 7: Idempotency-Key replay | Done |
-| Spec case 8: parallel requests give one 201 and one 409 | Done (advisory lock) |
-| Pagination on `GET /leads` | Done (cursor, "Load more") |
-| **B1 Harden the backend:** concurrency-safe duplicate check, Idempotency-Key, status workflow with audit log, cached gold-rate endpoint | Done |
-| **B2 Smarter agent:** 4th tool `check_existing_application`, prompt-injection tests, tool-status chips | Done |
-| B2: streamed replies | Not started |
-| Agent evals: prompt injection, Hinglish and changing your mind | Done (7 live evals plus scripted tests; not 10+ live) |
-| **B3 AI extras:** appraisal-slip photo extraction, plain-English admin filter | Not started |
-| **B4 Ops ready:** GitHub Actions CI, rate limits on `/leads` and the agent, [ARCHITECTURE.md](ARCHITECTURE.md) | Done |
-| B4: `docker compose up` for the whole app, demo video | Not done: Compose runs PostgreSQL only |
+| Bonus                                                                                                                                   | Status                                                |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Spec case 7: Idempotency-Key replay                                                                                                     | Done                                                  |
+| Spec case 8: parallel requests give one 201 and one 409                                                                                 | Done (advisory lock)                                  |
+| Pagination on `GET /leads`                                                                                                              | Done (cursor, "Load more")                            |
+| **B1 Harden the backend:** concurrency-safe duplicate check, Idempotency-Key, status workflow with audit log, cached gold-rate endpoint | Done                                                  |
+| **B2 Smarter agent:** 4th tool `check_existing_application`, prompt-injection tests, tool-status chips                                  | Done                                                  |
+| B2: streamed replies                                                                                                                    | Not started                                           |
+| Agent evals: prompt injection, Hinglish and changing your mind                                                                          | Done (7 live evals plus scripted tests; not 10+ live) |
+| **B3 AI extras:** appraisal-slip photo extraction, plain-English admin filter                                                           | Not started                                           |
+| **B4 Ops ready:** GitHub Actions CI, rate limits on `/leads` and the agent, [ARCHITECTURE.md](ARCHITECTURE.md)                          | Done                                                  |
+| B4: `docker compose up` for the whole app, demo video                                                                                   | Not done: Compose runs PostgreSQL only                |
 
 ## Known limitations
 

@@ -6,15 +6,61 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: tglobal
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d tglobal"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d tglobal']
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/tglobal
+      API_PORT: 3001
+      GOLD_RATE_24K_PAISE_PER_GRAM: ${GOLD_RATE_24K_PAISE_PER_GRAM:-700000}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.5-flash-lite}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-30000}
+      LLM_FALLBACK_BASE_URL: ${LLM_FALLBACK_BASE_URL:-https://api.groq.com/openai/v1/}
+      LLM_FALLBACK_API_KEY: ${LLM_FALLBACK_API_KEY:-}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-openai/gpt-oss-20b}
+      ADMIN_PASSCODE: ${ADMIN_PASSCODE:-}
+      RATE_LIMIT_LEADS_PER_MINUTE: ${RATE_LIMIT_LEADS_PER_MINUTE:-20}
+      RATE_LIMIT_AGENT_PER_MINUTE: ${RATE_LIMIT_AGENT_PER_MINUTE:-30}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - '${API_PORT:-3001}:3001'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3001/api/v1/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '${WEB_PORT:-5173}:80'
 
 volumes:
   postgres_data:

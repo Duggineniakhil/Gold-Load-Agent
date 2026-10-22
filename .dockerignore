@@ -1,0 +1,15 @@
+.git
+.claude
+.claude/
+.claude/**
+claude.md
+.env
+.env.*
+!.env.example
+node_modules
+**/node_modules
+**/dist
+**/coverage
+.playwright-browsers
+artifacts
+*.log

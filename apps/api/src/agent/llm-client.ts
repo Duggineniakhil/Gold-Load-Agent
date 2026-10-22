@@ -16,8 +16,11 @@ export type AssistantMessage = {
   [extra: string]: unknown;
 };
 
+export type MultimodalContent =
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+
 export type ChatMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system' | 'user'; content: string | MultimodalContent[] }
   | AssistantMessage
   | { role: 'tool'; tool_call_id: string; content: string };
 

@@ -6,11 +6,7 @@ import { env } from '../src/config/env.js';
 import { createApp } from '../src/app.js';
 import { createLeadRepository } from '../src/repositories/lead-repository.js';
 import { createLoanSchemeRepository } from '../src/repositories/loan-scheme-repository.js';
-import {
-  clearTestDatabase,
-  closeTestDatabase,
-  openTestDatabase,
-} from './helpers/database.js';
+import { clearTestDatabase, closeTestDatabase, openTestDatabase } from './helpers/database.js';
 import { fixedGoldRate, seededSchemes } from './helpers/fixtures.js';
 
 let prisma: PrismaClient;
@@ -59,7 +55,13 @@ describe('POST /api/v1/leads', () => {
     },
     {
       label: '10 g 18K EMI',
-      input: { ...basePayload, netWeightGrams: 10, grossWeightGrams: 12, karat: 18, mobileNumber: '9876543212' },
+      input: {
+        ...basePayload,
+        netWeightGrams: 10,
+        grossWeightGrams: 12,
+        karat: 18,
+        mobileNumber: '9876543212',
+      },
       expectedLoan: 3937500,
     },
   ])('creates a server-calculated application for $label', async ({ input, expectedLoan }) => {
@@ -67,7 +69,9 @@ describe('POST /api/v1/leads', () => {
     expect(response.body.status).toBe('SUBMITTED');
     expect(response.body.applicationId).toBe('GL-1001');
     expect(response.body.quote.eligibleLoanPaise).toBe(expectedLoan);
-    expect(response.body.lead.mobileNumber).toBe(`${input.mobileNumber.slice(0, 4)}XXXX${input.mobileNumber.slice(-2)}`);
+    expect(response.body.lead.mobileNumber).toBe(
+      `${input.mobileNumber.slice(0, 4)}XXXX${input.mobileNumber.slice(-2)}`,
+    );
     expect(response.body.lead.eligibleLoanPaise).toBe(expectedLoan);
   });
 
@@ -85,7 +89,12 @@ describe('POST /api/v1/leads', () => {
   it('returns validation errors for net over gross and the invalid mobile 5876543210', async () => {
     const response = await request(app())
       .post('/api/v1/leads')
-      .send({ ...basePayload, mobileNumber: '5876543210', netWeightGrams: 52, grossWeightGrams: 50 })
+      .send({
+        ...basePayload,
+        mobileNumber: '5876543210',
+        netWeightGrams: 52,
+        grossWeightGrams: 50,
+      })
       .expect(400);
     expect(response.body.error.fields).toEqual(
       expect.arrayContaining([
@@ -127,7 +136,10 @@ describe('POST /api/v1/leads', () => {
       .post('/api/v1/leads')
       .send({ ...basePayload, mobileNumber, netWeightGrams: 52, grossWeightGrams: 50 })
       .expect(400);
-    await request(app()).post('/api/v1/leads').send({ ...basePayload, mobileNumber }).expect(201);
+    await request(app())
+      .post('/api/v1/leads')
+      .send({ ...basePayload, mobileNumber })
+      .expect(201);
   });
 
   it('returns the existing application ID in a duplicate conflict', async () => {
@@ -166,12 +178,15 @@ describe('POST /api/v1/leads', () => {
     const api = app();
     for (let iteration = 0; iteration < 20; iteration += 1) {
       for (const count of [2, 10]) {
-        const mobileNumber = count === 2
-          ? `90${String(iteration).padStart(8, '0')}`
-          : `91${String(iteration).padStart(8, '0')}`;
+        const mobileNumber =
+          count === 2
+            ? `90${String(iteration).padStart(8, '0')}`
+            : `91${String(iteration).padStart(8, '0')}`;
         const responses = await Promise.all(
           Array.from({ length: count }, () =>
-            request(api).post('/api/v1/leads').send({ ...basePayload, mobileNumber }),
+            request(api)
+              .post('/api/v1/leads')
+              .send({ ...basePayload, mobileNumber }),
           ),
         );
         expect(responses.filter(({ status }) => status === 201)).toHaveLength(1);
@@ -186,15 +201,31 @@ describe('GET /api/v1/leads', () => {
     await prisma.lead.createMany({
       data: [
         {
-          name: 'Older Lead', mobileNumber: '9876543210', grossWeightMg: 50000, netWeightMg: 45000,
-          karat: 22, schemeId: 'PLAN_EMI_01', goldRatePaisePerGram: 700000n, pureGoldMg: 41250,
-          goldValuePaise: 28875000n, eligibleLoanPaise: 21656200n, ltvAppliedBps: 7500,
+          name: 'Older Lead',
+          mobileNumber: '9876543210',
+          grossWeightMg: 50000,
+          netWeightMg: 45000,
+          karat: 22,
+          schemeId: 'PLAN_EMI_01',
+          goldRatePaisePerGram: 700000n,
+          pureGoldMg: 41250,
+          goldValuePaise: 28875000n,
+          eligibleLoanPaise: 21656200n,
+          ltvAppliedBps: 7500,
           createdAt: new Date('2025-01-01T00:00:00.000Z'),
         },
         {
-          name: 'Newer Lead', mobileNumber: '9876543211', grossWeightMg: 50000, netWeightMg: 45000,
-          karat: 22, schemeId: 'PLAN_BULLET_01', goldRatePaisePerGram: 700000n, pureGoldMg: 41250,
-          goldValuePaise: 28875000n, eligibleLoanPaise: 20212500n, ltvAppliedBps: 7000,
+          name: 'Newer Lead',
+          mobileNumber: '9876543211',
+          grossWeightMg: 50000,
+          netWeightMg: 45000,
+          karat: 22,
+          schemeId: 'PLAN_BULLET_01',
+          goldRatePaisePerGram: 700000n,
+          pureGoldMg: 41250,
+          goldValuePaise: 28875000n,
+          eligibleLoanPaise: 20212500n,
+          ltvAppliedBps: 7000,
           createdAt: new Date('2025-01-02T00:00:00.000Z'),
         },
       ],
@@ -217,27 +248,48 @@ describe('GET /api/v1/leads', () => {
   });
 
   it('filters by plan and paginates with a cursor', async () => {
-    const createdAt = (day: number) => new Date(`2025-02-${String(day).padStart(2, '0')}T00:00:00.000Z`);
+    const createdAt = (day: number) =>
+      new Date(`2025-02-${String(day).padStart(2, '0')}T00:00:00.000Z`);
     await prisma.lead.createMany({
       data: [
         ...[1, 2, 3].map((day) => ({
-          name: 'EMI Lead', mobileNumber: `98765432${String(day).padStart(2, '0')}`,
-          grossWeightMg: 50000, netWeightMg: 45000, karat: 22, schemeId: 'PLAN_EMI_01',
-          goldRatePaisePerGram: 700000n, pureGoldMg: 41250, goldValuePaise: 28875000n,
-          eligibleLoanPaise: 21656200n, ltvAppliedBps: 7500, createdAt: createdAt(day),
+          name: 'EMI Lead',
+          mobileNumber: `98765432${String(day).padStart(2, '0')}`,
+          grossWeightMg: 50000,
+          netWeightMg: 45000,
+          karat: 22,
+          schemeId: 'PLAN_EMI_01',
+          goldRatePaisePerGram: 700000n,
+          pureGoldMg: 41250,
+          goldValuePaise: 28875000n,
+          eligibleLoanPaise: 21656200n,
+          ltvAppliedBps: 7500,
+          createdAt: createdAt(day),
         })),
         {
-          name: 'Bullet Lead', mobileNumber: '9876543299', grossWeightMg: 50000, netWeightMg: 45000,
-          karat: 22, schemeId: 'PLAN_BULLET_01', goldRatePaisePerGram: 700000n, pureGoldMg: 41250,
-          goldValuePaise: 28875000n, eligibleLoanPaise: 20212500n, ltvAppliedBps: 7000,
+          name: 'Bullet Lead',
+          mobileNumber: '9876543299',
+          grossWeightMg: 50000,
+          netWeightMg: 45000,
+          karat: 22,
+          schemeId: 'PLAN_BULLET_01',
+          goldRatePaisePerGram: 700000n,
+          pureGoldMg: 41250,
+          goldValuePaise: 28875000n,
+          eligibleLoanPaise: 20212500n,
+          ltvAppliedBps: 7000,
           createdAt: createdAt(4),
         },
       ],
     });
 
-    const firstPage = await request(app()).get('/api/v1/leads?planId=PLAN_EMI_01&limit=2').expect(200);
+    const firstPage = await request(app())
+      .get('/api/v1/leads?planId=PLAN_EMI_01&limit=2')
+      .expect(200);
     expect(firstPage.body.items).toHaveLength(2);
-    expect(firstPage.body.items.every((item: { planId: string }) => item.planId === 'PLAN_EMI_01')).toBe(true);
+    expect(
+      firstPage.body.items.every((item: { planId: string }) => item.planId === 'PLAN_EMI_01'),
+    ).toBe(true);
     expect(firstPage.body.nextCursor).toBeTruthy();
 
     const secondPage = await request(app())
@@ -245,5 +297,62 @@ describe('GET /api/v1/leads', () => {
       .expect(200);
     expect(secondPage.body.items).toHaveLength(1);
     expect(secondPage.body.nextCursor).toBeNull();
+  });
+
+  it('applies plain-English status, plan, and exact loan-amount filters before pagination', async () => {
+    await prisma.lead.createMany({
+      data: [
+        {
+          name: 'Asha Rao',
+          mobileNumber: '9876543230',
+          grossWeightMg: 50000,
+          netWeightMg: 45000,
+          karat: 22,
+          schemeId: 'PLAN_EMI_01',
+          goldRatePaisePerGram: 700000n,
+          pureGoldMg: 41250,
+          goldValuePaise: 28875000n,
+          eligibleLoanPaise: 21656200n,
+          ltvAppliedBps: 7500,
+        },
+        {
+          name: 'Ravi Kumar',
+          mobileNumber: '9876543231',
+          grossWeightMg: 50000,
+          netWeightMg: 45000,
+          karat: 22,
+          schemeId: 'PLAN_BULLET_01',
+          goldRatePaisePerGram: 700000n,
+          pureGoldMg: 41250,
+          goldValuePaise: 28875000n,
+          eligibleLoanPaise: 20212500n,
+          ltvAppliedBps: 7000,
+        },
+        {
+          name: 'Meera Rao',
+          mobileNumber: '9876543232',
+          grossWeightMg: 50000,
+          netWeightMg: 45000,
+          karat: 22,
+          schemeId: 'PLAN_EMI_01',
+          goldRatePaisePerGram: 700000n,
+          pureGoldMg: 41250,
+          goldValuePaise: 28875000n,
+          eligibleLoanPaise: 21656200n,
+          ltvAppliedBps: 7500,
+          status: 'APPROVED',
+        },
+      ],
+    });
+
+    const response = await request(app())
+      .get('/api/v1/leads')
+      .query({ filter: 'pending applications over ₹1 lakh on EMI plan' })
+      .expect(200);
+
+    expect(response.body.items.map((item: { name: string }) => item.name)).toEqual(['Asha Rao']);
+    expect(response.body.filterSummary).toBe(
+      'Filtered by awaiting review, EMI plan, loan over ₹1,00,000.',
+    );
   });
 });

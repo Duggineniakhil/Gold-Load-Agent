@@ -395,6 +395,21 @@ describe('Loan Assist agent', () => {
     expect(unknown.body.error.code).toBe('SESSION_NOT_FOUND');
   });
 
+  it('streams only the complete, number-guarded reply as Server-Sent Events', async () => {
+    const { app } = setup([say('Tell me about your gold and I can help.')]);
+
+    const response = await request(app)
+      .post('/api/v1/agent/messages/stream')
+      .send({ message: 'Hello' })
+      .expect(200)
+      .expect('Content-Type', /text\/event-stream/);
+
+    expect(response.text).toContain('event: start');
+    expect(response.text).toContain('event: delta');
+    expect(response.text).toContain('event: done');
+    expect(response.text).toContain('"reply":"Tell me about your gold and I can help."');
+  });
+
   it('answers 503 when no LLM key is configured', async () => {
     const app = createApp({
       loanSchemeRepository: createLoanSchemeRepository(prisma),

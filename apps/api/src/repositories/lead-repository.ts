@@ -36,6 +36,13 @@ export type LeadListOptions = {
   limit: number;
   cursor?: string | undefined;
   planId?: string | undefined;
+  status?: LeadStatus | undefined;
+  repaymentType?: 'BULLET' | 'EMI' | undefined;
+  karat?: number | undefined;
+  minNetWeightMg?: number | undefined;
+  minEligibleLoanPaise?: bigint | undefined;
+  maxEligibleLoanPaise?: bigint | undefined;
+  search?: string | undefined;
 };
 
 export type LeadStatusInfo = Pick<Lead, 'id' | 'applicationId' | 'status' | 'createdAt'>;
@@ -114,9 +121,43 @@ export function createLeadRepository(prisma: PrismaClient): LeadRepository {
           },
         });
       }),
-    list: async ({ limit, cursor, planId }) => {
+    list: async ({
+      limit,
+      cursor,
+      planId,
+      status,
+      repaymentType,
+      karat,
+      minNetWeightMg,
+      minEligibleLoanPaise,
+      maxEligibleLoanPaise,
+      search,
+    }) => {
       const rows = await prisma.lead.findMany({
-        ...(planId ? { where: { schemeId: planId } } : {}),
+        where: {
+          ...(planId ? { schemeId: planId } : {}),
+          ...(status ? { status } : {}),
+          ...(karat ? { karat } : {}),
+          ...(minNetWeightMg !== undefined ? { netWeightMg: { gte: minNetWeightMg } } : {}),
+          ...(minEligibleLoanPaise !== undefined || maxEligibleLoanPaise !== undefined
+            ? {
+                eligibleLoanPaise: {
+                  ...(minEligibleLoanPaise !== undefined ? { gte: minEligibleLoanPaise } : {}),
+                  ...(maxEligibleLoanPaise !== undefined ? { lte: maxEligibleLoanPaise } : {}),
+                },
+              }
+            : {}),
+          ...(repaymentType ? { scheme: { is: { repaymentType } } } : {}),
+          ...(search
+            ? {
+                OR: [
+                  { name: { contains: search, mode: 'insensitive' as const } },
+                  { applicationId: { contains: search, mode: 'insensitive' as const } },
+                  { scheme: { is: { name: { contains: search, mode: 'insensitive' as const } } } },
+                ],
+              }
+            : {}),
+        },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         take: limit + 1,

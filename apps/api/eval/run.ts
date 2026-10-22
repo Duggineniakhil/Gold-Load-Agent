@@ -161,6 +161,39 @@ const cases: EvalCase[] = [
       ['states the EMI loan of ₹96,250 from the tool', t.replies.includes('96,250')],
     ],
   },
+  {
+    name: '8. Cancelled application is never filed',
+    turns: [
+      {
+        say: 'Please prepare an application. My name is Ravi Kumar, mobile 9876500088, 45 g net, 50 g gross, 22K, Monthly EMI.',
+        nudgeUntilSummary: nudge,
+      },
+      { confirm: false },
+    ],
+    checks: async (t, prisma) => [
+      ['prepared a confirmation summary first', Boolean(anySummary(t))],
+      ['cancelled instead of submitting', lastTurn(t)?.submission?.outcome === 'cancelled'],
+      ['stored no lead', (await leadsFor(prisma, '9876500088')).length === 0],
+    ],
+  },
+  {
+    name: '9. Missing purity: asks instead of quoting',
+    turns: [{ say: 'I have 45 g net and 50 g gross jewellery. How much loan can I get?' }],
+    checks: async (t) => [
+      ['no quote calculated without karat', okCalls(t, 'calculate_quote') === 0],
+      ['asks for the missing purity', /karat|carat|purity/i.test(t.replies)],
+      ['no application summary prepared', !anySummary(t)],
+    ],
+  },
+  {
+    name: '10. Existing-application lookup does not require an application',
+    turns: [{ say: 'My mobile is 9876500099. Did I apply for a gold loan in the last 7 days?' }],
+    checks: async (t, prisma) => [
+      ['checked only the mobile number provided', okCalls(t, 'check_existing_application') === 1],
+      ['did not prepare an application', !anySummary(t)],
+      ['did not file a lead', (await leadsFor(prisma, '9876500099')).length === 0],
+    ],
+  },
 ];
 
 async function runCase(evalCase: EvalCase, prisma: PrismaClient, llm: LlmClient) {

@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { api, ApiError, type Plan, type Quote, type SubmittedLead } from '../lib/api';
+import {
+  api,
+  ApiError,
+  type AppraisalSlipExtraction,
+  type Plan,
+  type Quote,
+  type SubmittedLead,
+} from '../lib/api';
 import { duplicateMessage, formatDate, formatRupees } from '../lib/format';
 import { useLiveQuote, usePlans } from '../lib/hooks';
 import {
@@ -41,6 +48,19 @@ const fieldOrder: DetailsField[] = [
 ];
 const weightFields: DetailsField[] = ['grossWeightGrams', 'netWeightGrams'];
 
+function readImageData(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () =>
+      typeof reader.result === 'string'
+        ? resolve(reader.result)
+        : reject(new Error('Image could not be read.')),
+    );
+    reader.addEventListener('error', () => reject(new Error('Image could not be read.')));
+    reader.readAsDataURL(file);
+  });
+}
+
 /** Weights, karat and plan handed over by the calculator's "Apply with these details". */
 function prefillFrom(state: unknown): Partial<Form> {
   if (!state || typeof state !== 'object') return {};
@@ -63,6 +83,10 @@ export function ApplyPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [isDuplicate, setIsDuplicate] = useState(false);
+  const [appraisalFile, setAppraisalFile] = useState<File | null>(null);
+  const [appraisalResult, setAppraisalResult] = useState<AppraisalSlipExtraction | null>(null);
+  const [appraisalLoading, setAppraisalLoading] = useState(false);
+  const [appraisalError, setAppraisalError] = useState('');
   const [result, setResult] = useState<SubmittedLead | null>(null);
   const { plans, loading: plansLoading, error: plansError } = usePlans();
   const live = useLiveQuote(quoteInputFrom(form));
@@ -150,6 +174,41 @@ export function ApplyPage() {
     }
   }
 
+  async function readAppraisal() {
+    if (!appraisalFile) return;
+    setAppraisalLoading(true);
+    setAppraisalError('');
+    setAppraisalResult(null);
+    try {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(appraisalFile.type)) {
+        throw new Error('Choose a JPEG, PNG or WebP image.');
+      }
+      if (appraisalFile.size > 4 * 1024 * 1024) {
+        throw new Error('Choose an image smaller than 4 MB.');
+      }
+      const imageDataUrl = await readImageData(appraisalFile);
+      setAppraisalResult(await api.extractAppraisalSlip(imageDataUrl));
+    } catch (reason) {
+      setAppraisalError(
+        reason instanceof Error ? reason.message : 'The appraisal image could not be read.',
+      );
+    } finally {
+      setAppraisalLoading(false);
+    }
+  }
+
+  function useAppraisalValues() {
+    if (!appraisalResult) return;
+    if (appraisalResult.grossWeightGrams !== null) {
+      update('grossWeightGrams', appraisalResult.grossWeightGrams);
+    }
+    if (appraisalResult.netWeightGrams !== null) {
+      update('netWeightGrams', appraisalResult.netWeightGrams);
+    }
+    if (appraisalResult.karat !== null) update('karat', appraisalResult.karat);
+    setAppraisalResult(null);
+  }
+
   function startOver() {
     setForm(emptyForm);
     idempotencyKey.current = crypto.randomUUID();
@@ -201,6 +260,80 @@ export function ApplyPage() {
               <h2 ref={heading} tabIndex={-1} className="step-title">
                 Borrower and gold details
               </h2>
+              <section className="appraisal-upload" aria-labelledby="appraisal-upload-title">
+                <div>
+                  <h3 id="appraisal-upload-title">Have an appraisal slip?</h3>
+                  <p>
+                    Upload a clear photo to suggest its weights and karat. Review every value before
+                    using it.
+                  </p>
+                </div>
+                <label className="appraisal-upload__file">
+                  <span>Choose a photo</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(event) => {
+                      setAppraisalFile(event.target.files?.[0] ?? null);
+                      setAppraisalResult(null);
+                      setAppraisalError('');
+                    }}
+                  />
+                </label>
+                {appraisalFile && (
+                  <div className="appraisal-upload__selection">
+                    <span>{appraisalFile.name}</span>
+                    <Button
+                      type="button"
+                      tone="outline"
+                      disabled={appraisalLoading}
+                      onClick={() => void readAppraisal()}
+                    >
+                      {appraisalLoading ? 'Reading slip…' : 'Read slip'}
+                    </Button>
+                  </div>
+                )}
+                <p className="appraisal-upload__notice">
+                  The image is sent to the configured AI provider for reading; this app does not save it.
+                </p>
+                {appraisalError && (
+                  <p className="field__error" role="alert">
+                    {appraisalError}
+                  </p>
+                )}
+                {appraisalResult && (
+                  <div className="appraisal-upload__result" aria-live="polite">
+                    <p>Check these suggestions against the slip:</p>
+                    <dl>
+                      <div>
+                        <dt>Gross weight</dt>
+                        <dd>
+                          {appraisalResult.grossWeightGrams ?? 'Not read'}
+                          {appraisalResult.grossWeightGrams ? ' g' : ''}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Net gold weight</dt>
+                        <dd>
+                          {appraisalResult.netWeightGrams ?? 'Not read'}
+                          {appraisalResult.netWeightGrams ? ' g' : ''}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Karat</dt>
+                        <dd>
+                          {appraisalResult.karat === null
+                            ? 'Not read'
+                            : `${appraisalResult.karat}K`}
+                        </dd>
+                      </div>
+                    </dl>
+                    <Button type="button" onClick={useAppraisalValues}>
+                      Use readable values
+                    </Button>
+                  </div>
+                )}
+              </section>
               <fieldset className="form-group">
                 <legend>Borrower</legend>
                 <div className="field-grid">

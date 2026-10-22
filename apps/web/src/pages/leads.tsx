@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, useReducedMotion } from 'motion/react';
-import type { LeadStatus } from '@tglobal/shared';
 import { api, ApiError, type LeadSummary, type Plan } from '../lib/api';
 import { Button, Icon, Skeleton } from '../ui';
 import { LeadDrawer } from './lead-drawer';
@@ -36,20 +35,18 @@ export function LeadRegister({
   const [reloadKey, setReloadKey] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState('');
+  const [filterInput, setFilterInput] = useState('');
+  const [filter, setFilter] = useState('');
+  const [filterSummary, setFilterSummary] = useState('');
   const reduceMotion = useReducedMotion();
   const introDone = useRef(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const openLead = items.find((lead) => lead.applicationId === openId) ?? null;
   const closeDrawer = useCallback(() => setOpenId(null), []);
-  const updateRowStatus = useCallback(
-    (applicationId: string, status: LeadStatus) => {
-      setItems((current) =>
-        current.map((lead) => (lead.applicationId === applicationId ? { ...lead, status } : lead)),
-      );
-      onStatusChange();
-    },
-    [onStatusChange],
-  );
+  const updateRowStatus = useCallback(() => {
+    setReloadKey((key) => key + 1);
+    onStatusChange();
+  }, [onStatusChange]);
 
   useEffect(() => {
     let active = true;
@@ -57,11 +54,12 @@ export function LeadRegister({
     setError('');
     setLoadMoreError('');
     api
-      .leads({ planId })
+      .leads({ planId, filter })
       .then((page) => {
         if (!active) return;
         setItems(page.items);
         setNextCursor(page.nextCursor);
+        setFilterSummary(page.filterSummary);
         setStatus('ready');
       })
       .catch((reason: unknown) => {
@@ -76,7 +74,7 @@ export function LeadRegister({
     return () => {
       active = false;
     };
-  }, [planId, reloadKey, onUnauthorized]);
+  }, [planId, filter, reloadKey, onUnauthorized]);
 
   // Only the first batch of rows animates in; filter changes and "Load more" do not.
   useEffect(() => {
@@ -88,7 +86,7 @@ export function LeadRegister({
     setLoadingMore(true);
     setLoadMoreError('');
     try {
-      const page = await api.leads({ planId, cursor: nextCursor });
+      const page = await api.leads({ planId, cursor: nextCursor, filter });
       setItems((current) => [...current, ...page.items]);
       setNextCursor(page.nextCursor);
     } catch (reason) {
@@ -102,6 +100,11 @@ export function LeadRegister({
 
   const planName = plans.find((plan) => plan.id === planId)?.name;
   const caption = `Gold loan applications${planName ? ` on the ${planName} plan` : ''}, newest first`;
+
+  function applyFilter(event: FormEvent) {
+    event.preventDefault();
+    setFilter(filterInput.trim());
+  }
 
   return (
     <>
@@ -135,6 +138,32 @@ export function LeadRegister({
             </select>
           </div>
         </div>
+        <form className="register__query" onSubmit={applyFilter}>
+          <label htmlFor="register-query">Describe the applications you want to find</label>
+          <div>
+            <input
+              id="register-query"
+              value={filterInput}
+              maxLength={200}
+              placeholder="e.g. pending applications over ₹1 lakh on EMI"
+              onChange={(event) => setFilterInput(event.target.value)}
+            />
+            <Button type="submit">Search</Button>
+            {filter && (
+              <Button
+                type="button"
+                tone="outline"
+                onClick={() => {
+                  setFilterInput('');
+                  setFilter('');
+                }}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+          {filterSummary && <p aria-live="polite">{filterSummary}</p>}
+        </form>
 
         {status === 'loading' ? (
           <div className="register__state">
@@ -150,8 +179,18 @@ export function LeadRegister({
           </div>
         ) : items.length === 0 ? (
           <div className="register__state register__empty">
-            <p>{planName ? `No applications on ${planName} yet.` : 'No applications yet.'}</p>
-            <span>Submitted applications appear here, newest first.</span>
+            <p>
+              {filter
+                ? 'No applications match this filter.'
+                : planName
+                  ? `No applications on ${planName} yet.`
+                  : 'No applications yet.'}
+            </p>
+            <span>
+              {filter
+                ? 'Try a different phrase or clear the filter.'
+                : 'Submitted applications appear here, newest first.'}
+            </span>
             <div className="register__empty-actions">
               {planName && (
                 <Button tone="outline" onClick={() => onPlanChange('')}>

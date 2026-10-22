@@ -75,6 +75,18 @@ export const quoteRequestSchema = z
   })
   .superRefine(validateWeightOrder);
 
+export const appraisalSlipRequestSchema = z.object({
+  imageDataUrl: z
+    .string()
+    .max(5_600_000, 'Choose an image smaller than 4 MB.')
+    .regex(
+      /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/,
+      'Upload a JPEG, PNG or WebP image.',
+    ),
+});
+
+export type AppraisalSlipRequest = z.infer<typeof appraisalSlipRequestSchema>;
+
 export const leadRequestSchema = z
   .object({
     name: nameSchema,

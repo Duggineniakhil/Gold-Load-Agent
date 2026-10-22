@@ -114,16 +114,21 @@ export function createAgentService(deps: AgentServiceDependencies): AgentService
 
   function borrowerText(session: Session): string {
     return session.messages
-      .flatMap((message) => (message.role === 'user' ? [message.content] : []))
+      .flatMap((message) =>
+        message.role === 'user' && typeof message.content === 'string' ? [message.content] : [],
+      )
       .join('\n');
   }
 
   function trustedSources(session: Session): string[] {
     return [
       systemPrompt,
-      ...session.messages.flatMap((message) =>
-        message.role === 'user' || message.role === 'tool' ? [message.content] : [],
-      ),
+      ...session.messages.flatMap((message) => {
+        if (message.role === 'tool') return [message.content];
+        if (message.role === 'user' && typeof message.content === 'string')
+          return [message.content];
+        return [];
+      }),
     ];
   }
 

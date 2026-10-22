@@ -1,14 +1,15 @@
-import type { LeadAuditLog, LeadStatus } from '@prisma/client';
+import type { LeadAuditLog } from '@prisma/client';
 import {
   canTransition,
   leadStatuses,
   leadStatusTransitions,
+  type LeadStatus,
   type LeadRequest,
   type StatusUpdateRequest,
 } from '@tglobal/shared';
 import { AppError, ConflictError, NotFoundError } from '../errors.js';
 import { requestHash } from '../domain/idempotency.js';
-import { calculateQuote, parseWeightToMg } from '../domain/money.js';
+import { calculateQuote, formatINR, parseWeightToMg } from '../domain/money.js';
 import { maskMobile } from '../domain/mobile.js';
 import type { LeadRepository, LeadWithScheme } from '../repositories/lead-repository.js';
 
@@ -215,11 +216,142 @@ export async function getLeadAudit(applicationId: string, repository: LeadReposi
   };
 }
 
+export type PlainEnglishLeadFilter = {
+  status?: LeadStatus;
+  repaymentType?: 'BULLET' | 'EMI';
+  karat?: 18 | 22 | 24;
+  minNetWeightMg?: number;
+  minEligibleLoanPaise?: bigint;
+  maxEligibleLoanPaise?: bigint;
+  search?: string;
+  summary: string;
+};
+
+function thresholdPaise(amount: string, unit: string | undefined): bigint | null {
+  const normalized = amount.replace(/,/g, '');
+  const [whole = '0', fraction = ''] = normalized.split('.');
+  const multiplier = unit?.startsWith('l')
+    ? 10_000_000n
+    : unit?.startsWith('c')
+      ? 1_000_000_000n
+      : 100n;
+  const denominator = 10n ** BigInt(fraction.length);
+  const scaled = (BigInt(whole) * denominator + BigInt(fraction || '0')) * multiplier;
+  return scaled % denominator === 0n ? scaled / denominator : null;
+}
+
+function thresholdMg(amount: string): number | null {
+  if (!/^\d+(?:\.\d{1,3})?$/.test(amount)) return null;
+  const [whole = '0', fraction = ''] = amount.split('.');
+  const result = BigInt(whole) * 1000n + BigInt(fraction.padEnd(3, '0'));
+  return result <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(result) : null;
+}
+
+export function parsePlainEnglishLeadFilter(input: string): PlainEnglishLeadFilter {
+  let remaining = input.trim();
+  const criteria: string[] = [];
+  const parsed: Omit<PlainEnglishLeadFilter, 'summary'> = {};
+  const statusTerms: [RegExp, LeadStatus, string][] = [
+    [/\b(?:pending|new|submitted|awaiting review)\b/i, 'SUBMITTED', 'awaiting review'],
+    [/\bunder review\b/i, 'UNDER_REVIEW', 'under review'],
+    [/\bapproved\b/i, 'APPROVED', 'approved'],
+    [/\brejected\b/i, 'REJECTED', 'rejected'],
+  ];
+  for (const [pattern, status, label] of statusTerms) {
+    const match = pattern.exec(remaining);
+    if (match) {
+      parsed.status = status;
+      criteria.push(label);
+      remaining = remaining.replace(match[0], ' ');
+      break;
+    }
+  }
+
+  const repayment = /\b(emi|bullet)\b/i.exec(remaining);
+  if (repayment) {
+    parsed.repaymentType = repayment[1]?.toLowerCase() === 'emi' ? 'EMI' : 'BULLET';
+    criteria.push(`${repayment[1]?.toUpperCase()} plan`);
+    remaining = remaining.replace(repayment[0], ' ');
+  }
+
+  const karat = /\b(18|22|24)\s*(?:k|karat|carat)\b/i.exec(remaining);
+  if (karat) {
+    parsed.karat = Number(karat[1]) as 18 | 22 | 24;
+    criteria.push(`${karat[1]}K gold`);
+    remaining = remaining.replace(karat[0], ' ');
+  }
+
+  const weightPattern =
+    /\b(?:net\s+)?(?:weight\s+)?(above|over|greater than|more than|at least|>=)\s*(\d+(?:\.\d{1,3})?)\s*(?:g|grams?)\b/i;
+  const weight = weightPattern.exec(remaining);
+  if (weight) {
+    const amount = weight[2] ?? '';
+    let milligrams = thresholdMg(amount);
+    if (milligrams !== null) {
+      const strict = !['at least', '>='].includes(weight[1]?.toLowerCase() ?? '');
+      if (strict) milligrams += 1;
+      parsed.minNetWeightMg = milligrams;
+      criteria.push(`net weight ${strict ? 'over' : 'at least'} ${amount} g`);
+    }
+    remaining = remaining.replace(weight[0], ' ');
+  }
+
+  const amountPattern =
+    /\b(?:loan|amount)s?\s+(above|over|greater than|more than|at least|below|under|less than|at most|up to|>=|<=)\s*(?:₹\s*|rs\.?\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(lakh|lakhs|lac|lacs|l|crore|crores|cr|rupees?|inr)?/i;
+  const explicitAmountPattern =
+    /\b(above|over|greater than|more than|at least|below|under|less than|at most|up to|>=|<=)\s*(?:₹\s*|rs\.?\s*)(\d[\d,]*(?:\.\d{1,2})?)\s*(lakh|lakhs|lac|lacs|l|crore|crores|cr)?/i;
+  const amount = amountPattern.exec(remaining) ?? explicitAmountPattern.exec(remaining);
+  if (amount) {
+    const operator = amount[1]?.toLowerCase() ?? '';
+    const paise = thresholdPaise(amount[2] ?? '', amount[3]?.toLowerCase());
+    if (paise !== null) {
+      const minimum = ['above', 'over', 'greater than', 'more than', 'at least', '>='].includes(
+        operator,
+      );
+      const strict = [
+        'above',
+        'over',
+        'greater than',
+        'more than',
+        'below',
+        'under',
+        'less than',
+      ].includes(operator);
+      if (minimum) parsed.minEligibleLoanPaise = strict ? paise + 1n : paise;
+      else parsed.maxEligibleLoanPaise = strict ? paise - 1n : paise;
+      criteria.push(
+        `loan ${strict ? (minimum ? 'over' : 'below') : minimum ? 'at least' : 'up to'} ${formatINR(paise)}`,
+      );
+    }
+    remaining = remaining.replace(amount[0], ' ');
+  }
+
+  remaining = remaining
+    .replace(
+      /\b(?:applications?|leads?|show|list|find|all|loan|loans|for|on|plan|with|the|and|me|please|that|are|have|name|called|contains|belonging)\b/gi,
+      ' ',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (remaining) {
+    parsed.search = remaining.slice(0, 60);
+    criteria.push(`matching “${parsed.search}”`);
+  }
+
+  return { ...parsed, summary: criteria.length ? `Filtered by ${criteria.join(', ')}.` : '' };
+}
+
 export async function listLeads(
   repository: LeadRepository,
-  options: { limit: number; cursor?: string | undefined; planId?: string | undefined },
+  options: {
+    limit: number;
+    cursor?: string | undefined;
+    planId?: string | undefined;
+    filter?: string | undefined;
+  },
 ) {
-  const rows = await repository.list(options);
+  const parsedFilter = parsePlainEnglishLeadFilter(options.filter ?? '');
+  const rows = await repository.list({ ...options, ...parsedFilter });
   const page = rows.slice(0, options.limit);
   return {
     items: page.map((lead) => ({
@@ -235,6 +367,7 @@ export async function listLeads(
       createdAt: lead.createdAt,
     })),
     nextCursor: rows.length > options.limit ? (page.at(-1)?.id ?? null) : null,
+    filterSummary: parsedFilter.summary,
   };
 }
 

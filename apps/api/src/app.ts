@@ -5,6 +5,7 @@ import { z, ZodError } from 'zod';
 import {
   agentConfirmRequestSchema,
   agentMessageRequestSchema,
+  appraisalSlipRequestSchema,
   idempotencyKeySchema,
   leadRequestSchema,
   planIdSchema,
@@ -14,6 +15,7 @@ import {
   API_PREFIX,
 } from '@tglobal/shared';
 import type { Logger } from 'pino';
+import type { LlmClient } from './agent/llm-client.js';
 import type { LeadRepository } from './repositories/lead-repository.js';
 import type { LoanSchemeRepository } from './repositories/loan-scheme-repository.js';
 import type { AgentService } from './services/agent-service.js';
@@ -32,6 +34,7 @@ import { AppError, NotFoundError, ValidationError } from './errors.js';
 import { logger as defaultLogger } from './logger.js';
 import { createAdminGuard } from './admin-auth.js';
 import { createRateLimiter, type RateLimitOptions } from './rate-limit.js';
+import { extractAppraisalSlip } from './services/appraisal-service.js';
 
 export type AppDependencies = {
   loanSchemeRepository: LoanSchemeRepository;
@@ -39,6 +42,7 @@ export type AppDependencies = {
   goldRate: GoldRateService;
   /** Absent when no LLM key is configured; the agent routes then answer 503. */
   agent?: AgentService | undefined;
+  llm?: LlmClient | undefined;
   logger?: Logger;
   /** Per-IP limits; omitted (as in most tests) means no limit. */
   /** When set, the admin endpoints require it in the X-Admin-Passcode header. */
@@ -79,6 +83,26 @@ function requireAgent(agent: AgentService | undefined): AgentService {
   return agent;
 }
 
+function requireLlm(llm: LlmClient | undefined): LlmClient {
+  if (!llm) {
+    throw new AppError(
+      503,
+      'APPRAISAL_NOT_CONFIGURED',
+      'Appraisal photo reading is not configured on this server.',
+    );
+  }
+  return llm;
+}
+
+function replyChunks(text: string, size = 24): string[] {
+  const characters = Array.from(text);
+  const chunks: string[] = [];
+  for (let index = 0; index < characters.length; index += size) {
+    chunks.push(characters.slice(index, index + size).join(''));
+  }
+  return chunks;
+}
+
 export function createApp(deps: AppDependencies) {
   const app = express();
   const noLimit: RequestHandler = (_request, _response, next) => next();
@@ -98,7 +122,7 @@ export function createApp(deps: AppDependencies) {
       },
     }),
   );
-  app.use(express.json({ limit: '64kb' }));
+  app.use(express.json({ limit: '6mb' }));
 
   app.get(`${API_PREFIX}/health`, (_request, response) => {
     response.json({ ok: true });
@@ -145,6 +169,7 @@ export function createApp(deps: AppDependencies) {
       limit: z.coerce.number().int().min(1).max(100).default(20),
       cursor: z.string().min(1).optional(),
       planId: planIdSchema.optional(),
+      filter: z.string().trim().max(200).default(''),
     });
     const query = parseOrThrow(querySchema, request.query);
     response.json(await listLeads(deps.leadRepository, query));
@@ -180,6 +205,57 @@ export function createApp(deps: AppDependencies) {
   app.post(`${API_PREFIX}/agent/messages`, limitAgent, async (request, response) => {
     const input = parseOrThrow(agentMessageRequestSchema, request.body);
     response.json(await requireAgent(deps.agent).sendMessage(input));
+  });
+
+  app.post(`${API_PREFIX}/agent/messages/stream`, limitAgent, async (request, response) => {
+    const input = parseOrThrow(agentMessageRequestSchema, request.body);
+    const agent = requireAgent(deps.agent);
+    response.status(200);
+    response.set({
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    response.flushHeaders();
+    response.write('event: start\ndata: {}\n\n');
+    try {
+      const turn = await agent.sendMessage(input);
+      for (const delta of replyChunks(turn.reply)) {
+        if (response.destroyed) return;
+        response.write(`event: delta\ndata: ${JSON.stringify({ delta })}\n\n`);
+      }
+      if (!response.destroyed) {
+        response.write(`event: done\ndata: ${JSON.stringify(turn)}\n\n`);
+        response.end();
+      }
+    } catch (error) {
+      const shape =
+        error instanceof AppError
+          ? {
+              code: error.code,
+              message: error.message,
+              fields: error.fields,
+              ...error.extra,
+            }
+          : {
+              code: 'INTERNAL_ERROR',
+              message: 'An unexpected error occurred.',
+              fields: [],
+            };
+      if (!(error instanceof AppError) || error.statusCode >= 500) {
+        request.log.error({ err: error }, 'Loan Assist stream failed');
+      }
+      if (!response.destroyed) {
+        response.write(`event: error\ndata: ${JSON.stringify({ error: shape })}\n\n`);
+        response.end();
+      }
+    }
+  });
+
+  app.post(`${API_PREFIX}/appraisal-slip/extract`, limitAgent, async (request, response) => {
+    const input = parseOrThrow(appraisalSlipRequestSchema, request.body);
+    response.json(await extractAppraisalSlip(input.imageDataUrl, requireLlm(deps.llm)));
   });
 
   app.post(
@@ -235,6 +311,22 @@ export function createApp(deps: AppDependencies) {
       ) {
         response.status(400).json({
           error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON.', fields: [] },
+        });
+        return;
+      }
+
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'type' in error &&
+        error.type === 'entity.too.large'
+      ) {
+        response.status(413).json({
+          error: {
+            code: 'PAYLOAD_TOO_LARGE',
+            message: 'Request body exceeds the 6 MB limit.',
+            fields: [],
+          },
         });
         return;
       }

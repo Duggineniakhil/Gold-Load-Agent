@@ -47,6 +47,62 @@ async function post(path: string, body: unknown): Promise<AgentTurnResponse> {
   return payload as AgentTurnResponse;
 }
 
+async function postStream(
+  path: string,
+  body: unknown,
+  onDelta: (delta: string) => void,
+): Promise<AgentTurnResponse> {
+  const response = await fetch(`${API_PREFIX}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const error = new Error(
+      payload?.error?.message ?? 'Loan Assist could not be reached.',
+    ) as Error & { code?: string };
+    error.code = payload?.error?.code;
+    throw error;
+  }
+  if (!response.body) throw new Error('Loan Assist returned no reply stream.');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: AgentTurnResponse | undefined;
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const events = buffer.split('\n\n');
+    buffer = events.pop() ?? '';
+    for (const rawEvent of events) {
+      const lines = rawEvent.split('\n');
+      const event = lines.find((line) => line.startsWith('event: '))?.slice(7);
+      const data = lines
+        .filter((line) => line.startsWith('data: '))
+        .map((line) => line.slice(6))
+        .join('\n');
+      if (!event || !data) continue;
+      if (event === 'delta') {
+        onDelta((JSON.parse(data) as { delta: string }).delta);
+      } else if (event === 'done') {
+        result = JSON.parse(data) as AgentTurnResponse;
+      } else if (event === 'error') {
+        const payload = JSON.parse(data) as {
+          error: { code: string; message: string };
+        };
+        const error = new Error(payload.error.message) as Error & { code?: string };
+        error.code = payload.error.code;
+        throw error;
+      }
+    }
+    if (done) break;
+  }
+  if (!result) throw new Error('Loan Assist reply stream ended unexpectedly.');
+  return result;
+}
+
 /** Conversation state lives above the sheet so closing the panel keeps the chat. */
 export function useLoanAssist() {
   const [entries, setEntries] = useState<Entry[]>([greeting]);
@@ -59,15 +115,30 @@ export function useLoanAssist() {
   const append = (entry: Omit<Entry, 'id'>) =>
     setEntries((current) => [...current, { ...entry, id: nextId.current++ }]);
 
-  function receive(turn: AgentTurnResponse) {
+  function receive(turn: AgentTurnResponse, entryId?: number) {
     setSessionId(turn.sessionId);
     setPending(turn.pendingConfirmation);
-    append({
-      role: 'assistant',
-      text: turn.reply,
-      toolEvents: turn.toolEvents,
-      submission: turn.submission,
-    });
+    if (entryId === undefined) {
+      append({
+        role: 'assistant',
+        text: turn.reply,
+        toolEvents: turn.toolEvents,
+        submission: turn.submission,
+      });
+    } else {
+      setEntries((current) =>
+        current.map((entry) =>
+          entry.id === entryId
+            ? {
+                ...entry,
+                text: turn.reply,
+                toolEvents: turn.toolEvents,
+                submission: turn.submission,
+              }
+            : entry,
+        ),
+      );
+    }
   }
 
   async function run(action: () => Promise<AgentTurnResponse>) {
@@ -93,9 +164,39 @@ export function useLoanAssist() {
     busy,
     error,
     send(message: string) {
-      append({ role: 'user', text: message });
+      const userId = nextId.current++;
+      const assistantId = nextId.current++;
+      setEntries((current) => [
+        ...current,
+        { id: userId, role: 'user', text: message },
+        { id: assistantId, role: 'assistant', text: '' },
+      ]);
       setPending(null);
-      return run(() => post('/agent/messages', { message, ...(sessionId ? { sessionId } : {}) }));
+      setBusy(true);
+      setError('');
+      return postStream(
+        '/agent/messages/stream',
+        { message, ...(sessionId ? { sessionId } : {}) },
+        (delta) =>
+          setEntries((current) =>
+            current.map((entry) =>
+              entry.id === assistantId ? { ...entry, text: entry.text + delta } : entry,
+            ),
+          ),
+      )
+        .then((turn) => receive(turn, assistantId))
+        .catch((reason: unknown) => {
+          const failure = reason as Error & { code?: string };
+          if (failure.code === 'SESSION_NOT_FOUND') {
+            setSessionId(undefined);
+            setPending(null);
+          }
+          setEntries((current) =>
+            current.filter((entry) => entry.id !== assistantId || entry.text.length > 0),
+          );
+          setError(failure.message);
+        })
+        .finally(() => setBusy(false));
     },
     settle(confirm: boolean) {
       if (!sessionId) return Promise.resolve();

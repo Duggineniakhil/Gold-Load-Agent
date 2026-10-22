@@ -28,6 +28,7 @@ const app = createApp({
   leadRepository,
   goldRate,
   agent,
+  llm,
   adminPasscode: env.ADMIN_PASSCODE,
   rateLimits: {
     leads: perMinute(env.RATE_LIMIT_LEADS_PER_MINUTE),

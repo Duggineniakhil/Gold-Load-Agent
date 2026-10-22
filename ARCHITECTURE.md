@@ -59,7 +59,17 @@ The form and the AI agent call the **same service functions**, so an application
 - Every number in the reply must appear in a tool result, the borrower's messages or the system prompt. Otherwise the model is asked to rewrite once, and then a fixed reply is used.
 - A failed turn is rolled back, so the conversation stays valid.
 
+**Streamed replies.** `POST /agent/messages/stream` returns Server-Sent Events. The agent completes its normal tool loop and number guard first; only the verified final reply is sent as incremental text chunks, followed by the turn metadata. This preserves the number-guard guarantee while allowing the chat UI to render an arriving reply.
+
+**Appraisal slip.** `POST /appraisal-slip/extract` accepts a bounded JPEG, PNG or WebP data URL and calls the configured server-side multimodal model. Its response contains only validated weights and supported karat values (unreadable fields are `null`). The image is not persisted, and the form applies suggestions only after the borrower reviews them.
+
+**Admin search.** The admin register parses supported plain-English filters (status, repayment type, karat, net weight, loan amount and name/application text) in the lead service. The repository applies these constraints before cursor pagination; currency thresholds stay in integer paise.
+
 **Status workflow.** `PATCH /leads/:applicationId/status` checks the shared transition map, then runs `UPDATE … WHERE status = <current>` and inserts the audit row in one transaction. If another change won the race, the update matches no row and the request fails with `409 INVALID_TRANSITION`.
+
+## Docker Compose
+
+`docker compose up` starts PostgreSQL, the API and a production-built web app served by Nginx. The API waits for the database health check, applies migrations and seeds plans before listening. Nginx serves the SPA and proxies `/api/` to the API service; LLM credentials are injected only into the API container.
 
 ## LLM providers
 
