@@ -2,6 +2,8 @@
 
 TypeScript monorepo for the TGlobal gold-loan portal assignment. It contains an Express API, a Vite/React web app, shared TypeScript exports, and a PostgreSQL database managed with Prisma.
 
+Which AI tools were used, the exact prompts and the AI mistakes that were caught (with the tests that catch them) are in [AI_LOG.md](AI_LOG.md).
+
 ## Local setup
 
 Requirements: Node.js 20 or newer and Docker Compose.
