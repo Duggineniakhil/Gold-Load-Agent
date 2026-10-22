@@ -11,27 +11,9 @@ import {
   closeTestDatabase,
   openTestDatabase,
 } from './helpers/database.js';
+import { seededSchemes } from './helpers/fixtures.js';
 
 let prisma: PrismaClient;
-
-const schemes = [
-  {
-    id: 'PLAN_BULLET_01',
-    name: 'Bullet Repayment',
-    repaymentType: 'BULLET' as const,
-    annualInterestBps: 1200,
-    tenureMonths: 12,
-    maxLtvBps: 7000,
-  },
-  {
-    id: 'PLAN_EMI_01',
-    name: 'Monthly EMI',
-    repaymentType: 'EMI' as const,
-    annualInterestBps: 1050,
-    tenureMonths: 12,
-    maxLtvBps: 7500,
-  },
-];
 
 const basePayload = {
   name: 'Akhil Kumar',
@@ -56,7 +38,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await clearTestDatabase(prisma);
-  await prisma.loanScheme.createMany({ data: schemes });
+  await prisma.loanScheme.createMany({ data: seededSchemes });
 });
 
 afterAll(async () => {

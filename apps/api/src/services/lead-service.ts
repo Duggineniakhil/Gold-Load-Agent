@@ -1,9 +1,8 @@
 import { ConflictError, NotFoundError } from '../errors.js';
 import { calculateQuote, parseWeightToMg } from '../domain/money.js';
+import { maskMobile } from '../domain/mobile.js';
 import type { LeadRepository, LeadWithScheme } from '../repositories/lead-repository.js';
 import type { LeadRequest } from '@tglobal/shared';
-
-const maskMobile = (mobileNumber: string) => `${mobileNumber.slice(0, 4)}XXXX${mobileNumber.slice(-2)}`;
 
 function formatMgAsGrams(milligrams: number): string {
   return `${Math.floor(milligrams / 1000)}.${String(milligrams % 1000).padStart(3, '0')}`;

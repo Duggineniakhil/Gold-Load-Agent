@@ -1,13 +1,17 @@
 {
   "name": "tglobal-gold-loan-portal",
   "private": true,
-  "workspaces": ["apps/api", "apps/web", "packages/shared"],
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "packages/shared"
+  ],
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,green \"npm:dev --workspace=@tglobal/api\" \"npm:dev --workspace=@tglobal/web\"",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
-    "eval": "node -e \"process.exit(0)\"",
+    "eval": "npm run eval --workspace=@tglobal/api",
     "db:migrate": "npm run db:migrate --workspace=@tglobal/api",
     "db:seed": "npm run db:seed --workspace=@tglobal/api",
     "format": "prettier --write .",

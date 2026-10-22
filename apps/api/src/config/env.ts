@@ -11,12 +11,12 @@ const envSchema = z.object({
     .string()
     .url()
     .default('postgresql://postgres:postgres@localhost:5432/tglobal_test'),
-  PORT: z.coerce.number().int().positive().default(3001),
+  API_PORT: z.coerce.number().int().positive().default(3001),
   GOLD_RATE_24K_PAISE_PER_GRAM: z.coerce.bigint().positive().default(700000n),
   LLM_BASE_URL: z.string().url().default('https://generativelanguage.googleapis.com/v1beta/openai/'),
   LLM_API_KEY: z.string().default(''),
-  LLM_MODEL: z.string().min(1).default('gemini-2.0-flash'),
-  LLM_PROVIDER: z.string().min(1).default('gemini'),
+  LLM_MODEL: z.string().min(1).default('gemini-3.5-flash-lite'),
+  LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
 });
 
 const parsed = envSchema.safeParse(process.env);

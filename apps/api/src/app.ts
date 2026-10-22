@@ -1,12 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import { pinoHttp } from 'pino-http';
-import { ZodError } from 'zod';
-import { leadRequestSchema, planIdSchema, quoteRequestSchema, API_PREFIX } from '@tglobal/shared';
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
+import {
+  agentConfirmRequestSchema,
+  agentMessageRequestSchema,
+  leadRequestSchema,
+  planIdSchema,
+  quoteRequestSchema,
+  API_PREFIX,
+} from '@tglobal/shared';
 import type { Logger } from 'pino';
 import type { LeadRepository } from './repositories/lead-repository.js';
 import type { LoanSchemeRepository } from './repositories/loan-scheme-repository.js';
+import type { AgentService } from './services/agent-service.js';
 import { listActiveLoanSchemes } from './services/loan-scheme-service.js';
 import { listLeads, submitLead } from './services/lead-service.js';
 import { createQuotes } from './services/quote-service.js';
@@ -17,8 +24,29 @@ export type AppDependencies = {
   loanSchemeRepository: LoanSchemeRepository;
   leadRepository: LeadRepository;
   goldRatePaisePerGram: bigint;
+  /** Absent when no LLM key is configured; the agent routes then answer 503. */
+  agent?: AgentService | undefined;
   logger?: Logger;
 };
+
+function parseOrThrow<T extends z.ZodType>(schema: T, value: unknown): z.infer<T> {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    const fields = parsed.error.issues.map((issue) => ({
+      field: issue.path.map(String).join('.'),
+      message: issue.message,
+    }));
+    throw new ValidationError('Request validation failed.', fields);
+  }
+  return parsed.data;
+}
+
+function requireAgent(agent: AgentService | undefined): AgentService {
+  if (!agent) {
+    throw new AppError(503, 'AGENT_NOT_CONFIGURED', 'Loan Assist is not configured on this server. Set LLM_API_KEY.');
+  }
+  return agent;
+}
 
 export function createApp(deps: AppDependencies) {
   const app = express();
@@ -47,33 +75,13 @@ export function createApp(deps: AppDependencies) {
   });
 
   app.post(`${API_PREFIX}/quotes`, async (request, response) => {
-    const parsed = quoteRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      const fields = parsed.error.issues.map((issue) => ({
-        field: issue.path.map(String).join('.'),
-        message: issue.message,
-      }));
-      throw new ValidationError('Request validation failed.', fields);
-    }
-
-    response.json(
-      await createQuotes(parsed.data, deps.loanSchemeRepository, deps.goldRatePaisePerGram),
-    );
+    const input = parseOrThrow(quoteRequestSchema, request.body);
+    response.json(await createQuotes(input, deps.loanSchemeRepository, deps.goldRatePaisePerGram));
   });
 
   app.post(`${API_PREFIX}/leads`, async (request, response) => {
-    const parsed = leadRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      const fields = parsed.error.issues.map((issue) => ({
-        field: issue.path.map(String).join('.'),
-        message: issue.message,
-      }));
-      throw new ValidationError('Request validation failed.', fields);
-    }
-
-    response.status(201).json(
-      await submitLead(parsed.data, deps.leadRepository, deps.goldRatePaisePerGram),
-    );
+    const input = parseOrThrow(leadRequestSchema, request.body);
+    response.status(201).json(await submitLead(input, deps.leadRepository, deps.goldRatePaisePerGram));
   });
 
   app.get(`${API_PREFIX}/leads`, async (request, response) => {
@@ -82,15 +90,18 @@ export function createApp(deps: AppDependencies) {
       cursor: z.string().min(1).optional(),
       planId: planIdSchema.optional(),
     });
-    const parsed = querySchema.safeParse(request.query);
-    if (!parsed.success) {
-      const fields = parsed.error.issues.map((issue) => ({
-        field: issue.path.map(String).join('.'),
-        message: issue.message,
-      }));
-      throw new ValidationError('Request validation failed.', fields);
-    }
-    response.json(await listLeads(deps.leadRepository, parsed.data));
+    const query = parseOrThrow(querySchema, request.query);
+    response.json(await listLeads(deps.leadRepository, query));
+  });
+
+  app.post(`${API_PREFIX}/agent/messages`, async (request, response) => {
+    const input = parseOrThrow(agentMessageRequestSchema, request.body);
+    response.json(await requireAgent(deps.agent).sendMessage(input));
+  });
+
+  app.post(`${API_PREFIX}/agent/sessions/:sessionId/confirm`, async (request, response) => {
+    const { confirm } = parseOrThrow(agentConfirmRequestSchema, request.body);
+    response.json(await requireAgent(deps.agent).confirm(request.params.sessionId, confirm));
   });
 
   app.use((_request, _response, next) => next(new NotFoundError()));
@@ -104,6 +115,7 @@ export function createApp(deps: AppDependencies) {
     ) => {
       void _next;
       if (error instanceof AppError) {
+        if (error.statusCode >= 500) request.log.error({ err: error }, 'API dependency error');
         response.status(error.statusCode).json({
           error: {
             code: error.code,

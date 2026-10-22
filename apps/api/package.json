@@ -9,9 +9,12 @@
     "test": "vitest run --no-file-parallelism",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "db:migrate": "tsx scripts/migrate.ts",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "eval": "tsx eval/run.ts"
   },
-  "prisma": { "seed": "tsx prisma/seed.ts" },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
   "dependencies": {
     "@prisma/client": "^6.18.0",
     "@tglobal/shared": "*",

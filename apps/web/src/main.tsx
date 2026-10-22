@@ -6,6 +6,7 @@ import { API_PREFIX } from '@tglobal/shared';
 import '@fontsource/instrument-serif/400.css';
 import '@fontsource-variable/geist';
 import './index.css';
+import { LoanAssistChat, useLoanAssist } from './loan-assist';
 import { Button, Field, KaratSegmented, Money, PageTitle, PlanCard, Skeleton, StatusBadge, Stepper, Toast, type Plan } from './ui';
 
 type Quote = { goldRatePerGram: number; pureGoldGrams: string; goldValuePaise: number; quotes: { planId: string; name: string; ltvAppliedPercent: number; eligibleLoanPaise: number }[] };
@@ -14,6 +15,7 @@ const api = (path: string) => `${API_PREFIX}${path}`;
 
 function AppShell() {
   const [assistOpen, setAssistOpen] = useState(false);
+  const assist = useLoanAssist();
   const reduceMotion = useReducedMotion();
   const assistTrigger = useRef<HTMLButtonElement>(null);
   const assistClose = useRef<HTMLButtonElement>(null);
@@ -35,8 +37,9 @@ function AppShell() {
     <footer className="footer"><span>TGLOBAL <i>·</i> FIELD APPRAISAL</span><span>All figures are subject to physical verification.</span></footer>
     <AnimatePresence>{assistOpen && <motion.div className="sheet-backdrop" initial={reduceMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18 }} onMouseDown={(event) => { if (event.target === event.currentTarget) setAssistOpen(false); }}>
       <motion.aside className="assist-sheet" role="dialog" aria-modal="true" aria-labelledby="assist-heading" initial={reduceMotion ? false : { y: 18, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reduceMotion ? { opacity: 0 } : { y: 12, opacity: 0 }} transition={{ duration: reduceMotion ? 0 : 0.22 }}>
-        <div className="assist-sheet__head"><div><p className="eyebrow">FIELD REFERENCE</p><h2 id="assist-heading">Loan Assist</h2></div><button ref={assistClose} className="icon-button" onClick={() => setAssistOpen(false)} aria-label="Close Loan Assist">×</button></div>
-        <p>Quick answers for the work at hand.</p><div className="assist-sheet__topics"><span>Appraisal steps</span><span>Documents to collect</span><span>Repayment terms</span></div><div className="assist-sheet__note">Assistant responses will be available here.</div>
+        <div className="assist-sheet__head"><div><p className="eyebrow">AI ASSISTANT</p><h2 id="assist-heading">Loan Assist</h2></div><button ref={assistClose} className="icon-button" onClick={() => setAssistOpen(false)} aria-label="Close Loan Assist">×</button></div>
+        <p>Preliminary offers from today’s rate. Nothing is filed until you confirm.</p>
+        <LoanAssistChat chat={assist} />
       </motion.aside>
     </motion.div>}</AnimatePresence>
   </div>;

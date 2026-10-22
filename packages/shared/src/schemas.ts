@@ -75,3 +75,15 @@ export const leadRequestSchema = z
 export type QuoteRequest = z.infer<typeof quoteRequestSchema>;
 export type LeadRequest = z.infer<typeof leadRequestSchema>;
 export type RepaymentType = 'BULLET' | 'EMI';
+
+export const agentMessageRequestSchema = z.object({
+  sessionId: z.string().uuid().optional(),
+  message: z.string().trim().min(1, 'Type a message.').max(2000, 'Keep messages under 2000 characters.'),
+});
+
+export const agentConfirmRequestSchema = z.object({
+  confirm: z.boolean(),
+});
+
+export type AgentMessageRequest = z.infer<typeof agentMessageRequestSchema>;
+export type AgentConfirmRequest = z.infer<typeof agentConfirmRequestSchema>;

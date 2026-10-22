@@ -177,14 +177,36 @@ button { color: inherit; }
 .new-lead-link { text-decoration: none; }
 
 .sheet-backdrop { position: fixed; z-index: 5; inset: 0; background: rgb(20 17 13 / 24%); display: flex; justify-content: flex-end; }
-.assist-sheet { width: min(420px, 100%); height: 100%; background: var(--surface); padding: 28px; box-shadow: -12px 0 36px rgb(20 17 13 / 12%); }
+.assist-sheet { width: min(440px, 100%); height: 100%; background: var(--surface); padding: 28px; box-shadow: -12px 0 36px rgb(20 17 13 / 12%); display: flex; flex-direction: column; }
 .assist-sheet__head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--hairline); padding-bottom: 20px; }
 .assist-sheet__head h2 { margin: 0; font-family: var(--font-display); font-size: 34px; font-weight: 400; }
 .icon-button { width: 44px; height: 44px; border: 1px solid var(--hairline); border-radius: var(--radius); background: transparent; font-size: 21px; cursor: pointer; }
 .assist-sheet > p { margin: 24px 0 16px; color: var(--muted-ink); font-size: 13px; }
-.assist-sheet__topics { display: flex; flex-direction: column; }
-.assist-sheet__topics span { min-height: 47px; border-top: 1px solid var(--hairline); display: flex; align-items: center; font-size: 12px; }
-.assist-sheet__note { margin-top: 24px; border-left: 2px solid var(--gold); padding: 10px 0 10px 12px; color: var(--muted-ink); font-size: 11px; }
+.assist-sheet > p { margin: 14px 0 0; }
+.assist-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.assist-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px 2px; }
+.assist-message { max-width: 88%; display: flex; flex-direction: column; gap: 6px; }
+.assist-message p { margin: 0; white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
+.assist-message--assistant { align-self: flex-start; border-left: 2px solid var(--gold); padding-left: 12px; }
+.assist-message--user { align-self: flex-end; background: var(--ink); color: var(--surface); border-radius: var(--radius); padding: 9px 12px; }
+.assist-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.assist-chips li { border: 1px solid var(--hairline); border-radius: 999px; padding: 2px 9px; color: var(--muted-ink); font-size: 10px; font-weight: 600; letter-spacing: .04em; }
+.assist-chips li.is-error { border-color: var(--error); color: var(--error); }
+.assist-outcome { align-self: flex-start; border: 1px solid var(--success); border-radius: 999px; padding: 2px 9px; color: var(--success); font-size: 11px; font-weight: 650; }
+.assist-log .inline-error { margin: 0; padding-left: 0; }
+.assist-working { align-self: flex-start; color: var(--muted-ink); font-size: 12px; }
+.assist-summary { border: 1px solid var(--gold); border-radius: var(--radius); background: var(--paper); padding: 14px; }
+.assist-summary .eyebrow { margin: 0 0 10px; }
+.assist-summary dl { margin: 0; display: grid; gap: 6px; }
+.assist-summary dl div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.assist-summary dt { color: var(--muted-ink); }
+.assist-summary dd { margin: 0; text-align: right; font-weight: 560; }
+.assist-summary__loan { display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid var(--hairline); margin-top: 12px; padding-top: 10px; font-size: 12px; }
+.assist-summary__loan strong { font-family: var(--font-display); font-size: 28px; font-weight: 400; }
+.assist-summary__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.assist-composer { display: flex; gap: 8px; border-top: 1px solid var(--hairline); padding-top: 14px; }
+.assist-composer .field__input { flex: 1; min-width: 0; font-size: 16px; }
+.assist-reset { align-self: flex-start; margin-top: 8px; min-height: 32px; border: 0; background: transparent; padding: 0; color: var(--muted-ink); font-size: 11px; text-decoration: underline; cursor: pointer; }
 
 .component-gallery > .page-title { margin-bottom: 30px; }
 .gallery-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; border: 1px solid var(--hairline); background: var(--hairline); }
