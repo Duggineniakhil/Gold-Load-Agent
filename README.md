@@ -22,7 +22,7 @@ How it fits together is in [ARCHITECTURE.md](ARCHITECTURE.md). AI tools, exact p
 
 - Node.js 20 or newer (npm 10)
 - Docker with Compose, for PostgreSQL 16
-- Optional: a Gemini API key, for Loan Assist and the live evals
+- Optional: a Gemini API key (and optionally a Groq key as fallback), for Loan Assist, slip extraction and the live evals
 
 ## Setup
 
@@ -136,22 +136,26 @@ Other checks: `npm run typecheck` and `npm run lint`. GitHub Actions ([`.github/
 
 Base path: `/api/v1`. Every error has the same shape: `{ "error": { "code", "message", "fields": [{ "field", "message" }] } }`. That includes malformed JSON, unknown routes, rate limits (`429 RATE_LIMITED` with `Retry-After`) and 500s, which never include a stack trace. Mobile numbers are always masked (`9876XXXX10`).
 
-Loan Assist messages can also be sent to `POST /agent/messages/stream`, which streams verified reply chunks as Server-Sent Events. `POST /appraisal-slip/extract` accepts an image data URL and uses the configured server-side LLM to suggest weights and karat; the borrower must review and apply the suggestions in the form.
+The chat uses `POST /agent/messages/stream`, which sends the reply as Server-Sent Events (`start`, `delta` chunks, then `done` with the full turn, or `error` in the usual error shape). The reply is streamed only after it has passed the number check, so unverified text never reaches the borrower. `POST /appraisal-slip/extract` takes an image data URL and asks the server-side LLM to read gross weight, net weight and karat from the slip. It returns only values printed on the slip (or `null`), validated with the shared schemas, and the borrower reviews them in the form before anything is quoted.
 
-| Method and path                           | Purpose                                                                         |
-| ----------------------------------------- | ------------------------------------------------------------------------------- |
-| `GET /loan-schemes`                       | Active plans                                                                    |
-| `POST /quotes`                            | Quote for every plan (no database write)                                        |
-| `POST /leads`                             | Validate, recompute, de-duplicate and store; optional `Idempotency-Key` header  |
-| `POST /repayment-estimates`               | Calculator: EMI or bullet repayment for a loan amount on a plan, in exact paise |
-| `GET /leads?planId=&limit=&cursor=`       | Admin: newest first, masked, cursor pagination                                  |
-| `GET /leads/stats?planId=`                | Admin: count per status and total eligible loans                                |
-| `PATCH /leads/:applicationId/status`      | Admin: status workflow step, audited                                            |
-| `GET /leads/:applicationId/audit`         | Admin: status history                                                           |
-| `GET /gold-rate`                          | Cached 24K rate (60 s)                                                          |
-| `POST /agent/messages`                    | Send a message to Loan Assist                                                   |
-| `POST /agent/sessions/:sessionId/confirm` | Confirm or cancel the prepared application                                      |
-| `GET /health`                             | Liveness check                                                                  |
+| Method and path                             | Purpose                                                                           |
+| ------------------------------------------- | --------------------------------------------------------------------------------- |
+| `GET /loan-schemes`                         | Active plans                                                                      |
+| `POST /quotes`                              | Quote for every plan (no database write)                                          |
+| `POST /leads`                               | Validate, recompute, de-duplicate and store; optional `Idempotency-Key` header    |
+| `POST /repayment-estimates`                 | Calculator: EMI or bullet repayment for a loan amount on a plan, in exact paise   |
+| `GET /leads?planId=&filter=&limit=&cursor=` | Admin: newest first, masked, cursor pagination; `filter` is plain English (below) |
+| `GET /leads/stats?planId=`                  | Admin: count per status and total eligible loans                                  |
+| `PATCH /leads/:applicationId/status`        | Admin: status workflow step, audited                                              |
+| `GET /leads/:applicationId/audit`           | Admin: status history                                                             |
+| `GET /gold-rate`                            | Cached 24K rate (60 s)                                                            |
+| `POST /agent/messages`                      | Send a message to Loan Assist                                                     |
+| `POST /agent/messages/stream`               | The same, with the reply streamed as Server-Sent Events                           |
+| `POST /appraisal-slip/extract`              | Read weights and karat from an appraisal-slip photo (needs an LLM key)            |
+| `POST /agent/sessions/:sessionId/confirm`   | Confirm or cancel the prepared application                                        |
+| `GET /health`                               | Liveness check                                                                    |
+
+**Plain-English admin filter.** `filter` accepts phrases such as `approved EMI 22K over 40 g`. A rule-based parser (no LLM, no SQL built from text) understands status words (pending/new/submitted, under review, approved, rejected), `EMI` or `bullet`, `18K`/`22K`/`24K` and net-weight thresholds (`over`, `above`, `at least` … grams), and the response's `filterSummary` says how the text was read.
 
 **Quote** (spec case 1):
 
@@ -317,24 +321,26 @@ Gemini and Groq have been tested; the other rows are examples. Run `npm run eval
 
 ## Bonuses attempted
 
-| Bonus                                                                                                                                   | Status                                                |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Spec case 7: Idempotency-Key replay                                                                                                     | Done                                                  |
-| Spec case 8: parallel requests give one 201 and one 409                                                                                 | Done (advisory lock)                                  |
-| Pagination on `GET /leads`                                                                                                              | Done (cursor, "Load more")                            |
-| **B1 Harden the backend:** concurrency-safe duplicate check, Idempotency-Key, status workflow with audit log, cached gold-rate endpoint | Done                                                  |
-| **B2 Smarter agent:** 4th tool `check_existing_application`, prompt-injection tests, tool-status chips                                  | Done                                                  |
-| B2: streamed replies                                                                                                                    | Not started                                           |
-| Agent evals: prompt injection, Hinglish and changing your mind                                                                          | Done (7 live evals plus scripted tests; not 10+ live) |
-| **B3 AI extras:** appraisal-slip photo extraction, plain-English admin filter                                                           | Not started                                           |
-| **B4 Ops ready:** GitHub Actions CI, rate limits on `/leads` and the agent, [ARCHITECTURE.md](ARCHITECTURE.md)                          | Done                                                  |
-| B4: `docker compose up` for the whole app, demo video                                                                                   | Not done: Compose runs PostgreSQL only                |
+| Bonus                                                                                                                                                 | Status                                                        |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Spec case 7: Idempotency-Key replay                                                                                                                   | Done                                                          |
+| Spec case 8: parallel requests give one 201 and one 409                                                                                               | Done (advisory lock)                                          |
+| Pagination on `GET /leads`                                                                                                                            | Done (cursor, "Load more")                                    |
+| **B1 Harden the backend:** concurrency-safe duplicate check, Idempotency-Key, status workflow with audit log, cached gold-rate endpoint               | Done                                                          |
+| **B2 Smarter agent:** 4th tool `check_existing_application`, prompt-injection tests, tool-status chips, streamed replies                              | Done (replies stream after the number check, see limitations) |
+| Agent evals: prompt injection, Hinglish, changing your mind, 10+ automated evals                                                                      | Done (10 live evals plus scripted tests)                      |
+| **B3 AI extras:** appraisal-slip photo extraction, plain-English admin filter                                                                         | Done (slip extraction not yet tried on real slip photos)      |
+| **B4 Ops ready:** `docker compose up` for the whole app, GitHub Actions CI, rate limits on `/leads` and the agent, [ARCHITECTURE.md](ARCHITECTURE.md) | Done                                                          |
+| B4: 2-minute demo video                                                                                                                               | Not done                                                      |
 
 ## Known limitations
 
 - **Admin access is one shared passcode** (`ADMIN_PASSCODE`), not individual logins, and it is off when unset. It is checked on the server in constant time, with 10 wrong tries per IP per 15 minutes. The audit `actor` is a name the admin types.
 - **Loan Assist conversations are kept in API memory** (30-minute idle expiry, 1,000-session cap). A restart ends open chats, and running more than one API instance would need a shared store.
-- **Free-tier latency:** replies take roughly 5–20 seconds and are not streamed. Gemini sometimes returns "high demand" errors; Groq then answers instead, and only if both fail does the user see `503 LLM_UNAVAILABLE`.
+- **Free-tier latency:** replies take roughly 5–20 seconds. Gemini sometimes returns "high demand" errors; Groq then answers instead, and only if both fail does the user see `503 LLM_UNAVAILABLE`.
+- **Streaming starts after the reply is complete.** The server waits for the full, number-checked reply and then streams it in chunks, so the first words do not arrive sooner; the trade-off keeps unverified figures from ever being shown.
+- **Rate limits behind the Docker proxy:** Express is not configured to trust Nginx's `X-Forwarded-For`, so under `docker compose up` every request appears to come from the Nginx container and all users share one per-IP limit (including the admin passcode lockout). Local `npm run dev` is not affected. The fix is a `trust proxy` setting enabled only in Docker.
+- **Appraisal-slip extraction** depends on the model reading images: it has been tested with a scripted model, not yet with real slip photos, and the Groq fallback model cannot read images.
 - **Mobile numbers reach the LLM provider** when the borrower types them in the chat. They are masked in every API response and log.
 - **Idempotency keys never expire,** and only successful `201` responses are stored.
 - **Rate-limit counters are in memory and per IP,** like the chat sessions, so they reset on restart and assume a single API instance.
@@ -344,7 +350,8 @@ Gemini and Groq have been tested; the other rows are examples. Run `npm run eval
 ## What I'd do with more time
 
 - Replace the shared admin passcode with individual logins and roles, so the audit actor comes from the session.
-- Move Loan Assist sessions and rate-limit counters into Redis, and stream replies.
-- Package the API and web app in Docker so `docker compose up` runs everything, and record a demo video.
+- Move Loan Assist sessions and rate-limit counters into Redis, and trust the Docker proxy so per-IP limits work behind Nginx.
+- Stream tokens as the model writes them, checking figures as they arrive, and record a demo video.
+- Try slip extraction on real appraisal-slip photos and add an image-capable fallback model.
 - Expire idempotency keys after 24 hours, and add the missing `LoanScheme` index migration.
 - Grow the live eval set past 10 conversations, with a pass threshold, so prompt or model changes are caught in CI.
