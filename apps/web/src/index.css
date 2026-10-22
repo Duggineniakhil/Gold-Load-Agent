@@ -340,6 +340,33 @@ p { text-wrap: pretty; }
 .register__table small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
 .register__table .is-numeric { text-align: right; font-weight: 600; }
 .register__table .is-mono { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.register__table th[scope='row'] { padding: 16px 22px; border-top: 1px solid var(--line); text-align: left; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; background: none; color: var(--ink); font-size: 15px; letter-spacing: 0; text-transform: none; }
+.register__table time { white-space: nowrap; }
+.register__more { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px; border-top: 1px solid var(--line); }
+.register__more .field__error { margin: 0; }
+.register__empty .button { margin-top: 16px; }
+.register__empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+
+@media (max-width: 1023px) {
+  .register__table { font-size: 14px; }
+  .register__table th, .register__table td, .register__table th[scope='row'] { padding-left: 10px; padding-right: 10px; font-size: inherit; }
+  .register__table thead th { font-size: 11px; }
+  .register__table .status-badge { padding: 0 7px; font-size: 10px; letter-spacing: .02em; }
+  .register__table th, .register__table td, .register__table th[scope='row'] { padding-left: 8px; padding-right: 8px; }
+  .register__table time { white-space: normal; }
+}
+
+@media (max-width: 767px) {
+  .register__toolbar { flex-direction: column; align-items: stretch; padding: 14px 16px; }
+  .register__filter select { flex: 1; }
+  .register__table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .register__table, .register__table tbody, .register__table tr, .register__table td, .register__table th[scope='row'] { display: block; }
+  .register__table tr { padding: 12px 16px; border-top: 1px solid var(--line); }
+  .register__table td, .register__table th[scope='row'] { display: flex; align-items: baseline; gap: 6px; padding: 5px 0; border: 0; text-align: right; }
+  .register__table td::before, .register__table th[scope='row']::before { content: attr(data-label); margin-right: auto; color: var(--muted); font-size: 13px; font-weight: 500; text-align: left; }
+  .register__table th[scope='row'] { font-size: 16px; }
+  .register__table td small { display: inline; margin: 0; }
+}
 
 /* Loan Assist */
 .sheet-backdrop { position: fixed; z-index: 10; inset: 0; display: flex; justify-content: flex-end; background: rgb(27 23 18 / 28%); backdrop-filter: blur(2px); }
@@ -423,14 +450,6 @@ p { text-wrap: pretty; }
   .stepper button { flex-direction: column; gap: 4px; min-height: 58px; font-size: 12px; }
   .success__card { padding: 30px 20px; }
   .success__card h1 { font-size: 42px; }
-  .register__toolbar { flex-direction: column; align-items: stretch; padding: 14px 16px; }
-  .register__filter select { flex: 1; }
-  .register__table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
-  .register__table, .register__table tbody, .register__table tr, .register__table td { display: block; }
-  .register__table tr { padding: 12px 16px; border-top: 1px solid var(--line); }
-  .register__table td { display: flex; align-items: baseline; gap: 6px; padding: 5px 0; border: 0; text-align: right; }
-  .register__table td::before { content: attr(data-label); margin-right: auto; color: var(--muted); font-size: 13px; font-weight: 500; text-align: left; }
-  .register__table td small { display: inline; margin: 0; }
   .assist-sheet { padding: 18px 16px; }
   .cta { padding: 40px 20px; border-radius: 22px; }
 }

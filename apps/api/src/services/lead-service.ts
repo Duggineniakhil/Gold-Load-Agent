@@ -107,6 +107,7 @@ export async function listLeads(
   return {
     items: page.map((lead) => ({
       applicationId: lead.applicationId,
+      name: lead.name,
       mobileNumber: maskMobile(lead.mobileNumber),
       netWeightGrams: lead.netWeightMg / 1000,
       karat: lead.karat,

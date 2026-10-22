@@ -206,12 +206,14 @@ describe('GET /api/v1/leads', () => {
       '9876XXXX10',
     ]);
     expect(response.body.items[0]).toMatchObject({
+      name: 'Newer Lead',
       planId: 'PLAN_BULLET_01',
       planName: 'Bullet Repayment',
       netWeightGrams: 45,
       eligibleLoanPaise: 20212500,
       status: 'SUBMITTED',
     });
+    expect(JSON.stringify(response.body)).not.toMatch(/[6-9]\d{9}/);
   });
 
   it('filters by plan and paginates with a cursor', async () => {

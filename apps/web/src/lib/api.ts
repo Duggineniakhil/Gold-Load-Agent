@@ -25,6 +25,7 @@ export type Quote = {
 
 export type LeadSummary = {
   applicationId: string;
+  name: string;
   mobileNumber: string;
   netWeightGrams: number;
   karat: number;
@@ -34,6 +35,9 @@ export type LeadSummary = {
   status: string;
   createdAt: string;
 };
+
+export type LeadPage = { items: LeadSummary[]; nextCursor: string | null };
+export const LEADS_PAGE_SIZE = 20;
 
 export type SubmittedLead = {
   applicationId: string;
@@ -99,8 +103,10 @@ export const api = {
   quote: (input: QuoteRequest, signal?: AbortSignal) =>
     request<Quote>('/quotes', postJson(input, signal)),
   submitLead: (input: LeadRequest) => request<SubmittedLead>('/leads', postJson(input)),
-  leads: (planId: string) =>
-    request<{ items: LeadSummary[] }>(
-      `/leads?limit=50${planId ? `&planId=${encodeURIComponent(planId)}` : ''}`,
-    ),
+  leads: ({ planId, cursor }: { planId: string; cursor?: string | null }) => {
+    const query = new URLSearchParams({ limit: String(LEADS_PAGE_SIZE) });
+    if (planId) query.set('planId', planId);
+    if (cursor) query.set('cursor', cursor);
+    return request<LeadPage>(`/leads?${query}`);
+  },
 };

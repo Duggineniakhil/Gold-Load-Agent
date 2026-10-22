@@ -22,3 +22,11 @@ export function formatDate(iso: string, withYear = true): string {
 export function duplicateMessage(existing: { applicationId: string; createdAt: string }): string {
   return `You already applied on ${formatDate(existing.createdAt, false)}, application ${existing.applicationId}.`;
 }
+
+/**
+ * The API already masks mobiles (9876XXXX10). This is a second line of defence so the
+ * UI never shows a full 10-digit number even if a response regresses.
+ */
+export function displayMobile(value: string): string {
+  return value.replace(/\d{10}/g, (digits) => `${digits.slice(0, 4)}XXXX${digits.slice(-2)}`);
+}

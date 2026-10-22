@@ -47,37 +47,58 @@ const quote = {
     },
   ],
 };
-const leads = [
-  {
-    applicationId: 'GL-1002',
-    mobileNumber: '9876XXXX11',
-    netWeightGrams: 45,
-    karat: 22,
-    planId: 'PLAN_EMI_01',
-    planName: 'Monthly EMI',
-    eligibleLoanPaise: 21656200,
+const names = ['Ravi Kumar', 'Asha Rao', 'Imran Shaikh', 'Lakshmi Narayanan', 'Priya Menon'];
+// 25 leads, newest first; GL-1024 is deliberately unmasked to prove the UI masks it anyway.
+const leads = Array.from({ length: 25 }, (_, index) => {
+  const number = 1025 - index;
+  const emi = index % 3 !== 1;
+  return {
+    applicationId: `GL-${number}`,
+    name: names[index % names.length],
+    mobileNumber:
+      number === 1024
+        ? '9876543210'
+        : `98${String(number).slice(-2)}XXXX${String(index).padStart(2, '0')}`,
+    netWeightGrams: emi ? 45 : 10,
+    karat: emi ? 22 : 18,
+    planId: emi ? 'PLAN_EMI_01' : 'PLAN_BULLET_01',
+    planName: emi ? 'Monthly EMI' : 'Bullet Repayment',
+    eligibleLoanPaise: emi ? 21656200 : 3675000,
     status: 'SUBMITTED',
-    createdAt: '2026-10-22T09:30:00.000Z',
-  },
-  {
-    applicationId: 'GL-1001',
-    mobileNumber: '9123XXXX45',
-    netWeightGrams: 10,
-    karat: 18,
-    planId: 'PLAN_BULLET_01',
-    planName: 'Bullet Repayment',
-    eligibleLoanPaise: 3675000,
-    status: 'SUBMITTED',
-    createdAt: '2026-10-21T06:10:00.000Z',
-  },
-];
+    createdAt: new Date(Date.UTC(2026, 9, 22, 9, 30) - index * 3_600_000).toISOString(),
+  };
+});
 
-async function mockApi(page, { duplicate = false } = {}) {
+function leadsPage(url) {
+  const query = new URL(url).searchParams;
+  const limit = Number(query.get('limit') ?? 20);
+  const filtered = leads.filter(
+    (lead) => !query.get('planId') || lead.planId === query.get('planId'),
+  );
+  const start = query.get('cursor')
+    ? filtered.findIndex((lead) => lead.applicationId === query.get('cursor')) + 1
+    : 0;
+  const items = filtered.slice(start, start + limit);
+  return { items, nextCursor: start + limit < filtered.length ? items.at(-1).applicationId : null };
+}
+
+async function mockApi(page, { duplicate = false, leadsMode = 'paged' } = {}) {
+  const control = { failLeads: leadsMode === 'error' };
   await page.route('**/api/v1/loan-schemes', (route) => route.fulfill({ json: plans }));
   await page.route('**/api/v1/quotes', (route) => route.fulfill({ json: quote }));
   await page.route('**/api/v1/leads**', (route) => {
-    if (route.request().method() === 'GET')
-      return route.fulfill({ json: { items: leads, nextCursor: null } });
+    if (route.request().method() === 'GET') {
+      if (control.failLeads) {
+        return route.fulfill({
+          status: 500,
+          json: {
+            error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred.', fields: [] },
+          },
+        });
+      }
+      if (leadsMode === 'empty') return route.fulfill({ json: { items: [], nextCursor: null } });
+      return route.fulfill({ json: leadsPage(route.request().url()) });
+    }
     if (duplicate) {
       return route.fulfill({
         status: 409,
@@ -101,6 +122,7 @@ async function mockApi(page, { duplicate = false } = {}) {
       },
     });
   });
+  return control;
 }
 
 async function capture(page, name, viewport) {
@@ -121,7 +143,90 @@ async function fillDetails(page) {
   await page.getByText('Up to date').waitFor();
 }
 
+async function assertNoUnmaskedMobile(page, name) {
+  const text = await page.locator('main').innerText();
+  if (/[6-9]\d{9}/.test(text)) throw new Error(`${name} shows an unmasked mobile number`);
+}
+
+async function walkLeads(browser, viewport) {
+  const open = async (options) => {
+    const page = await browser.newPage({
+      viewport: { width: viewport.width, height: viewport.height },
+      deviceScaleFactor: 1,
+    });
+    const control = await mockApi(page, options);
+    return { page, control };
+  };
+
+  const { page } = await open();
+  await page.goto(`${base}/leads`, { waitUntil: 'networkidle' });
+  await page.getByText('GL-1025').waitFor();
+  const table = page.getByRole('table', { name: 'Gold loan applications, newest first' });
+  if ((await table.locator('tbody tr').count()) !== 20)
+    throw new Error('first page should show 20 rows');
+  const rowDisplay = await table
+    .locator('tbody tr')
+    .first()
+    .evaluate((row) => getComputedStyle(row).display);
+  if (rowDisplay !== (viewport.width >= 768 ? 'table-row' : 'block')) {
+    throw new Error(
+      `expected ${viewport.width >= 768 ? 'a table' : 'stacked cards'} at ${viewport.width}px`,
+    );
+  }
+  await assertNoUnmaskedMobile(page, 'leads');
+  const clipped = await table.evaluate(
+    (element) => element.scrollWidth > element.parentElement.clientWidth,
+  );
+  if (clipped) throw new Error(`the leads table is clipped inside its card at ${viewport.width}px`);
+  await capture(page, 'leads', viewport);
+
+  await page.getByRole('button', { name: 'Load more' }).click();
+  await page.getByText('GL-1001').waitFor();
+  if ((await table.locator('tbody tr').count()) !== 25)
+    throw new Error('Load more should append 5 rows');
+  if (await page.getByRole('button', { name: 'Load more' }).count())
+    throw new Error('Load more should disappear on the last page');
+
+  await page.getByLabel('Plan').selectOption('PLAN_BULLET_01');
+  await page.waitForURL(/\?planId=PLAN_BULLET_01$/);
+  await page
+    .getByRole('table', {
+      name: 'Gold loan applications on the Bullet Repayment plan, newest first',
+    })
+    .waitFor();
+  await assertNoUnmaskedMobile(page, 'leads-filtered');
+  await capture(page, 'leads-filtered', viewport);
+
+  await page.reload({ waitUntil: 'networkidle' });
+  if ((await page.getByLabel('Plan').inputValue()) !== 'PLAN_BULLET_01')
+    throw new Error('plan filter should survive a reload');
+  await page.close();
+
+  const { page: empty } = await open({ leadsMode: 'empty' });
+  await empty.goto(`${base}/leads`, { waitUntil: 'networkidle' });
+  await empty.getByRole('link', { name: /Start an application/ }).waitFor();
+  await capture(empty, 'leads-empty', viewport);
+  await empty.close();
+
+  const { page: failing, control } = await open({ leadsMode: 'error' });
+  await failing.goto(`${base}/leads`, { waitUntil: 'networkidle' });
+  await failing.getByRole('button', { name: 'Try again' }).waitFor();
+  await capture(failing, 'leads-error', viewport);
+  control.failLeads = false;
+  await failing.getByRole('button', { name: 'Try again' }).click();
+  await failing.getByText('GL-1025').waitFor();
+  await failing.close();
+}
+
 const browser = await chromium.launch({ headless: true });
+for (const viewport of [
+  { name: '375', width: 375, height: 812 },
+  { name: '768', width: 768, height: 1024 },
+  { name: '1440', width: 1440, height: 1000 },
+]) {
+  await walkLeads(browser, viewport);
+}
+
 for (const viewport of [
   { name: '375', width: 375, height: 812 },
   { name: '1440', width: 1440, height: 1000 },
@@ -134,9 +239,6 @@ for (const viewport of [
 
   await page.goto(`${base}/`, { waitUntil: 'networkidle' });
   await capture(page, 'home', viewport);
-
-  await page.goto(`${base}/leads`, { waitUntil: 'networkidle' });
-  await capture(page, 'leads', viewport);
 
   await page.goto(`${base}/apply`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: /Continue to quote/ }).click();
