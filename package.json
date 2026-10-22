@@ -1,0 +1,26 @@
+{
+  "name": "tglobal-gold-loan-portal",
+  "private": true,
+  "workspaces": ["apps/api", "apps/web", "packages/shared"],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev --workspace=@tglobal/api\" \"npm:dev --workspace=@tglobal/web\"",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "eval": "node -e \"process.exit(0)\"",
+    "db:migrate": "npm run db:migrate --workspace=@tglobal/api",
+    "db:seed": "npm run db:seed --workspace=@tglobal/api",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.5.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2"
+  }
+}

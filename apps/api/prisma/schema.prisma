@@ -1,0 +1,20 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model LoanScheme {
+  id                   String   @id
+  name                 String
+  annualInterestRate   Decimal  @db.Decimal(5, 2)
+  maxLtv               Decimal  @db.Decimal(4, 3)
+  tenureMonths         Int
+  repaymentType        String
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
