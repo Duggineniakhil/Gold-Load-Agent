@@ -50,21 +50,21 @@ function validateWeightOrder(
   value: { netWeightGrams: string | number; grossWeightGrams: string | number },
   ctx: z.RefinementCtx,
 ) {
-    const toMg = (weight: string | number) => {
-      const text = String(weight);
-      if (!gramsPattern.test(text)) return null;
-      const [whole = '0', fraction = ''] = text.split('.');
-      return BigInt(whole) * 1000n + BigInt(fraction.padEnd(3, '0') || '0');
-    };
-    const netWeightMg = toMg(value.netWeightGrams);
-    const grossWeightMg = toMg(value.grossWeightGrams);
-    if (netWeightMg !== null && grossWeightMg !== null && netWeightMg > grossWeightMg) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['netWeightGrams'],
-        message: 'Net weight cannot exceed gross weight.',
-      });
-    }
+  const toMg = (weight: string | number) => {
+    const text = String(weight);
+    if (!gramsPattern.test(text)) return null;
+    const [whole = '0', fraction = ''] = text.split('.');
+    return BigInt(whole) * 1000n + BigInt(fraction.padEnd(3, '0') || '0');
+  };
+  const netWeightMg = toMg(value.netWeightGrams);
+  const grossWeightMg = toMg(value.grossWeightGrams);
+  if (netWeightMg !== null && grossWeightMg !== null && netWeightMg > grossWeightMg) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['netWeightGrams'],
+      message: 'Net weight cannot exceed gross weight.',
+    });
+  }
 }
 
 export const quoteRequestSchema = z
@@ -92,7 +92,11 @@ export type RepaymentType = 'BULLET' | 'EMI';
 
 export const agentMessageRequestSchema = z.object({
   sessionId: z.string().uuid().optional(),
-  message: z.string().trim().min(1, 'Type a message.').max(2000, 'Keep messages under 2000 characters.'),
+  message: z
+    .string()
+    .trim()
+    .min(1, 'Type a message.')
+    .max(2000, 'Keep messages under 2000 characters.'),
 });
 
 export const agentConfirmRequestSchema = z.object({
@@ -101,3 +105,35 @@ export const agentConfirmRequestSchema = z.object({
 
 export type AgentMessageRequest = z.infer<typeof agentMessageRequestSchema>;
 export type AgentConfirmRequest = z.infer<typeof agentConfirmRequestSchema>;
+
+export const leadStatuses = ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'REJECTED'] as const;
+export type LeadStatus = (typeof leadStatuses)[number];
+
+/** The only status changes allowed. Shared so the API enforces and the UI offers the same moves. */
+export const leadStatusTransitions: Record<LeadStatus, readonly LeadStatus[]> = {
+  SUBMITTED: ['UNDER_REVIEW'],
+  UNDER_REVIEW: ['APPROVED', 'REJECTED'],
+  APPROVED: [],
+  REJECTED: [],
+};
+
+export const canTransition = (from: LeadStatus, to: LeadStatus) =>
+  leadStatusTransitions[from].includes(to);
+
+export const leadStatusSchema = z.enum(leadStatuses, { error: 'Choose a valid status.' });
+
+export const statusUpdateRequestSchema = z.object({
+  status: leadStatusSchema,
+  actor: z
+    .string({ error: 'Enter who is making this change.' })
+    .trim()
+    .min(2, 'Enter at least 2 characters.')
+    .max(60, 'Keep the name to 60 characters or fewer.'),
+});
+
+/** Printable ASCII, no spaces, up to 255 characters (a UUID is typical). */
+export const idempotencyKeySchema = z
+  .string()
+  .regex(/^[\x21-\x7E]{1,255}$/, 'Use 1–255 printable characters without spaces.');
+
+export type StatusUpdateRequest = z.infer<typeof statusUpdateRequestSchema>;

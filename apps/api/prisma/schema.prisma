@@ -50,10 +50,33 @@ model Lead {
   eligibleLoanPaise     BigInt
   ltvAppliedBps         Int
   status                LeadStatus @default(SUBMITTED)
-  idempotencyKey        String?    @unique
   createdAt             DateTime   @default(now())
   updatedAt             DateTime   @updatedAt
+  auditLog              LeadAuditLog[]
+  idempotencyRecords    IdempotencyRecord[]
 
   @@index([mobileNumber, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
+}
+
+model IdempotencyRecord {
+  key            String   @id
+  requestHash    String
+  responseStatus Int
+  responseBody   Json
+  leadId         String   @db.Uuid
+  lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdAt      DateTime @default(now())
+}
+
+model LeadAuditLog {
+  id         String     @id @default(uuid()) @db.Uuid
+  leadId     String     @db.Uuid
+  lead       Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  fromStatus LeadStatus
+  toStatus   LeadStatus
+  actor      String
+  at         DateTime   @default(now())
+
+  @@index([leadId, at])
 }

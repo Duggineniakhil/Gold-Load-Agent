@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useReducedMotion } from 'motion/react';
+import { AnimatePresence, useReducedMotion } from 'motion/react';
+import type { LeadStatus } from '@tglobal/shared';
 import { api, type LeadSummary } from '../lib/api';
 import { usePlans } from '../lib/hooks';
 import { Button, ButtonLink, Icon, PageHeader, Skeleton } from '../ui';
+import { LeadDrawer } from './lead-drawer';
 import { LeadsTable } from './leads-table';
 
 type Status = 'loading' | 'ready' | 'error';
@@ -21,6 +23,14 @@ export function LeadsPage() {
   const [loadMoreError, setLoadMoreError] = useState('');
   const reduceMotion = useReducedMotion();
   const introDone = useRef(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const openLead = items.find((lead) => lead.applicationId === openId) ?? null;
+  const closeDrawer = useCallback(() => setOpenId(null), []);
+  const updateRowStatus = useCallback((applicationId: string, status: LeadStatus) => {
+    setItems((current) =>
+      current.map((lead) => (lead.applicationId === applicationId ? { ...lead, status } : lead)),
+    );
+  }, []);
 
   const setPlanFilter = (value: string) => setSearchParams(value ? { planId: value } : {});
 
@@ -156,6 +166,7 @@ export function LeadsPage() {
               items={items}
               caption={caption}
               animateRows={!introDone.current && !reduceMotion}
+              onOpen={(lead) => setOpenId(lead.applicationId)}
             />
             {(nextCursor || loadMoreError) && (
               <div className="register__more">
@@ -172,6 +183,11 @@ export function LeadsPage() {
           </>
         )}
       </div>
+      <AnimatePresence>
+        {openLead && (
+          <LeadDrawer lead={openLead} onClose={closeDrawer} onStatusChange={updateRowStatus} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

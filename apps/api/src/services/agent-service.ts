@@ -229,17 +229,14 @@ export function createAgentService(deps: AgentServiceDependencies): AgentService
       submission = { outcome: 'cancelled' };
     } else {
       try {
-        const result = await submitLead(
-          pending.input,
-          deps.leadRepository,
-          deps.goldRatePaisePerGram,
-        );
+        const { ratePaisePerGram } = await deps.goldRate.current();
+        const result = await submitLead(pending.input, deps.leadRepository, ratePaisePerGram);
         reply = `Your application ${result.applicationId} has been submitted. Eligible loan: ${formatINR(result.quote.eligibleLoanPaise)} on the ${result.quote.planName} plan. This is a preliminary offer, subject to physical verification of your gold.`;
         submission = {
           outcome: 'submitted',
           applicationId: result.applicationId,
           status: result.status,
-          createdAt: result.createdAt.toISOString(),
+          createdAt: result.createdAt,
         };
       } catch (error) {
         if (!(error instanceof ConflictError) || error.code !== 'DUPLICATE_APPLICATION')

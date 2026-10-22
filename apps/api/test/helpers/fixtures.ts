@@ -1,3 +1,5 @@
+import { createGoldRateService } from '../../src/services/gold-rate-service.js';
+
 export const seededSchemes = [
   {
     id: 'PLAN_BULLET_01',
@@ -16,3 +18,7 @@ export const seededSchemes = [
     maxLtvBps: 7500,
   },
 ];
+
+/** A gold-rate service pinned to one rate, for tests. */
+export const fixedGoldRate = (ratePaisePerGram = 700000n) =>
+  createGoldRateService({ source: async () => ({ ratePaisePerGram, source: 'test' }) });

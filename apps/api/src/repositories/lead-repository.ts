@@ -1,4 +1,11 @@
-import type { Lead, LoanScheme, Prisma, PrismaClient } from '@prisma/client';
+import type {
+  Lead,
+  LeadAuditLog,
+  LeadStatus,
+  LoanScheme,
+  Prisma,
+  PrismaClient,
+} from '@prisma/client';
 
 export type SchemeForLead = Pick<
   LoanScheme,
@@ -6,10 +13,23 @@ export type SchemeForLead = Pick<
 >;
 export type LeadWithScheme = Lead & { scheme: SchemeForLead };
 export type ExistingLead = Pick<Lead, 'applicationId' | 'createdAt'>;
+export type StoredIdempotentResponse = {
+  requestHash: string;
+  responseStatus: number;
+  responseBody: unknown;
+};
 
 export interface LeadTransaction {
   findRecentByMobile(mobileNumber: string): Promise<ExistingLead | null>;
   create(data: Prisma.LeadUncheckedCreateInput): Promise<LeadWithScheme>;
+  findIdempotencyRecord(key: string): Promise<StoredIdempotentResponse | null>;
+  saveIdempotencyRecord(record: {
+    key: string;
+    requestHash: string;
+    responseStatus: number;
+    responseBody: Prisma.InputJsonValue;
+    leadId: string;
+  }): Promise<void>;
 }
 
 export type LeadListOptions = {
@@ -18,10 +38,31 @@ export type LeadListOptions = {
   planId?: string | undefined;
 };
 
+export type LeadStatusInfo = Pick<Lead, 'id' | 'applicationId' | 'status' | 'createdAt'>;
+
 export interface LeadRepository {
   findScheme(planId: string): Promise<SchemeForLead | null>;
-  withMobileLock<T>(mobileNumber: string, operation: (transaction: LeadTransaction) => Promise<T>): Promise<T>;
+  /**
+   * Runs `operation` in one transaction holding PostgreSQL advisory locks on every key.
+   * Keys are locked in sorted order so two requests can never deadlock each other.
+   */
+  withLocks<T>(
+    lockKeys: string[],
+    operation: (transaction: LeadTransaction) => Promise<T>,
+  ): Promise<T>;
   list(options: LeadListOptions): Promise<LeadWithScheme[]>;
+  findStatus(applicationId: string): Promise<LeadStatusInfo | null>;
+  /**
+   * Moves the lead from `from` to `to` and writes the audit row in one transaction.
+   * Returns null when the lead is no longer in `from` (another change won the race).
+   */
+  transitionStatus(change: {
+    applicationId: string;
+    from: LeadStatus;
+    to: LeadStatus;
+    actor: string;
+  }): Promise<{ lead: Lead; entry: LeadAuditLog } | null>;
+  auditLog(leadId: string): Promise<LeadAuditLog[]>;
 }
 
 export function createLeadRepository(prisma: PrismaClient): LeadRepository {
@@ -38,9 +79,11 @@ export function createLeadRepository(prisma: PrismaClient): LeadRepository {
           maxLtvBps: true,
         },
       }),
-    withMobileLock: (mobileNumber, operation) =>
+    withLocks: (lockKeys, operation) =>
       prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${mobileNumber}))::text AS lock_acquired`;
+        for (const key of [...new Set(lockKeys)].sort()) {
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))::text AS lock_acquired`;
+        }
         return operation({
           findRecentByMobile: async (mobile) => {
             const rows = await tx.$queryRaw<ExistingLead[]>`
@@ -54,6 +97,14 @@ export function createLeadRepository(prisma: PrismaClient): LeadRepository {
             return rows[0] ?? null;
           },
           create: (data) => tx.lead.create({ data, include: { scheme: true } }),
+          findIdempotencyRecord: (key) =>
+            tx.idempotencyRecord.findUnique({
+              where: { key },
+              select: { requestHash: true, responseStatus: true, responseBody: true },
+            }),
+          saveIdempotencyRecord: async (record) => {
+            await tx.idempotencyRecord.create({ data: record });
+          },
         });
       }),
     list: async ({ limit, cursor, planId }) => {
@@ -66,5 +117,25 @@ export function createLeadRepository(prisma: PrismaClient): LeadRepository {
       });
       return rows;
     },
+    findStatus: (applicationId) =>
+      prisma.lead.findUnique({
+        where: { applicationId },
+        select: { id: true, applicationId: true, status: true, createdAt: true },
+      }),
+    transitionStatus: ({ applicationId, from, to, actor }) =>
+      prisma.$transaction(async (tx) => {
+        const { count } = await tx.lead.updateMany({
+          where: { applicationId, status: from },
+          data: { status: to },
+        });
+        if (count === 0) return null;
+        const lead = await tx.lead.findUniqueOrThrow({ where: { applicationId } });
+        const entry = await tx.leadAuditLog.create({
+          data: { leadId: lead.id, fromStatus: from, toStatus: to, actor },
+        });
+        return { lead, entry };
+      }),
+    auditLog: (leadId) =>
+      prisma.leadAuditLog.findMany({ where: { leadId }, orderBy: { at: 'asc' } }),
   };
 }

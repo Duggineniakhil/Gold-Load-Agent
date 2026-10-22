@@ -55,6 +55,8 @@ export function ApplyPage() {
   const live = useLiveQuote(quoteInputFrom(form));
   const heading = useRef<HTMLHeadingElement>(null);
   const firstRender = useRef(true);
+  // One key per version of the form: retrying the same submission replays it, an edit starts afresh.
+  const idempotencyKey = useRef(crypto.randomUUID());
 
   const errors = validateDetails(form);
   const visibleError = (field: DetailsField) => {
@@ -74,6 +76,7 @@ export function ApplyPage() {
 
   function update<K extends keyof Form>(field: K, value: Form[K]) {
     setForm((current) => ({ ...current, [field]: value }));
+    idempotencyKey.current = crypto.randomUUID();
     setServerErrors((current) => ({ ...current, [field]: undefined }));
     setSubmitError('');
     setIsDuplicate(false);
@@ -102,7 +105,12 @@ export function ApplyPage() {
     setIsDuplicate(false);
     try {
       const { planId, karat, ...details } = form;
-      setResult(await api.submitLead({ ...details, karat: karat as 18 | 22 | 24, planId }));
+      setResult(
+        await api.submitLead(
+          { ...details, karat: karat as 18 | 22 | 24, planId },
+          idempotencyKey.current,
+        ),
+      );
     } catch (reason) {
       const error =
         reason instanceof ApiError
@@ -131,6 +139,7 @@ export function ApplyPage() {
 
   function startOver() {
     setForm(emptyForm);
+    idempotencyKey.current = crypto.randomUUID();
     setTouched(new Set());
     setAttempted(false);
     setServerErrors({});

@@ -11,6 +11,7 @@ import { createOpenAiCompatibleClient, type LlmClient } from '../src/agent/llm-c
 import { createLeadRepository } from '../src/repositories/lead-repository.js';
 import { createLoanSchemeRepository } from '../src/repositories/loan-scheme-repository.js';
 import { createAgentService } from '../src/services/agent-service.js';
+import { createGoldRateService, mockGoldRateSource } from '../src/services/gold-rate-service.js';
 import { submitLead } from '../src/services/lead-service.js';
 import {
   clearTestDatabase,
@@ -171,7 +172,7 @@ async function runCase(evalCase: EvalCase, prisma: PrismaClient, llm: LlmClient)
     llm,
     loanSchemeRepository: createLoanSchemeRepository(prisma),
     leadRepository: createLeadRepository(prisma),
-    goldRatePaisePerGram: env.GOLD_RATE_24K_PAISE_PER_GRAM,
+    goldRate: createGoldRateService({ source: mockGoldRateSource(env.GOLD_RATE_24K_PAISE_PER_GRAM) }),
     logger: pino({ enabled: false }),
   });
 

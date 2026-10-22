@@ -69,10 +69,10 @@ const leads = Array.from({ length: 25 }, (_, index) => {
   };
 });
 
-function leadsPage(url) {
+function leadsPage(url, rows) {
   const query = new URL(url).searchParams;
   const limit = Number(query.get('limit') ?? 20);
-  const filtered = leads.filter(
+  const filtered = rows.filter(
     (lead) => !query.get('planId') || lead.planId === query.get('planId'),
   );
   const start = query.get('cursor')
@@ -84,9 +84,50 @@ function leadsPage(url) {
 
 async function mockApi(page, { duplicate = false, leadsMode = 'paged' } = {}) {
   const control = { failLeads: leadsMode === 'error' };
+  // Each page gets its own copy so status changes do not leak between runs.
+  const rows = leads.map((lead) => ({ ...lead }));
+  const history = new Map();
+  const transitions = {
+    SUBMITTED: ['UNDER_REVIEW'],
+    UNDER_REVIEW: ['APPROVED', 'REJECTED'],
+    APPROVED: [],
+    REJECTED: [],
+  };
   await page.route('**/api/v1/loan-schemes', (route) => route.fulfill({ json: plans }));
   await page.route('**/api/v1/quotes', (route) => route.fulfill({ json: quote }));
   await page.route('**/api/v1/leads**', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const applicationId = path.split('/')[4];
+    const lead = rows.find((row) => row.applicationId === applicationId);
+    if (path.endsWith('/audit')) {
+      return route.fulfill({
+        json: {
+          applicationId,
+          status: lead.status,
+          submittedAt: lead.createdAt,
+          entries: history.get(applicationId) ?? [],
+        },
+      });
+    }
+    if (route.request().method() === 'PATCH') {
+      const { status, actor } = route.request().postDataJSON();
+      if (!transitions[lead.status].includes(status)) {
+        return route.fulfill({
+          status: 409,
+          json: {
+            error: {
+              code: 'INVALID_TRANSITION',
+              message: `${applicationId} is ${lead.status}.`,
+              fields: [],
+            },
+          },
+        });
+      }
+      const entry = { from: lead.status, to: status, actor, at: new Date().toISOString() };
+      lead.status = status;
+      history.set(applicationId, [...(history.get(applicationId) ?? []), entry]);
+      return route.fulfill({ json: { applicationId, status, updatedAt: entry.at, entry } });
+    }
     if (route.request().method() === 'GET') {
       if (control.failLeads) {
         return route.fulfill({
@@ -97,7 +138,19 @@ async function mockApi(page, { duplicate = false, leadsMode = 'paged' } = {}) {
         });
       }
       if (leadsMode === 'empty') return route.fulfill({ json: { items: [], nextCursor: null } });
-      return route.fulfill({ json: leadsPage(route.request().url()) });
+      return route.fulfill({ json: leadsPage(route.request().url(), rows) });
+    }
+    if (!route.request().headers()['idempotency-key']) {
+      return route.fulfill({
+        status: 400,
+        json: {
+          error: {
+            code: 'TEST_MISSING_KEY',
+            message: 'Idempotency-Key header missing.',
+            fields: [],
+          },
+        },
+      });
     }
     if (duplicate) {
       return route.fulfill({
@@ -216,6 +269,29 @@ async function walkLeads(browser, viewport) {
   await failing.getByRole('button', { name: 'Try again' }).click();
   await failing.getByText('GL-1025').waitFor();
   await failing.close();
+
+  const { page: admin } = await open();
+  await admin.goto(`${base}/leads`, { waitUntil: 'networkidle' });
+  await admin.getByRole('button', { name: 'GL-1025: view status and history' }).click();
+  const drawer = admin.getByRole('dialog', { name: 'GL-1025' });
+  await drawer.locator('.timeline').getByText('Submitted', { exact: true }).waitFor();
+  await drawer.getByRole('button', { name: 'Start review' }).click();
+  await drawer.getByText('Enter at least 2 characters.').waitFor();
+  await drawer.getByLabel('Your name').fill('Asha Rao');
+  await drawer.getByRole('button', { name: 'Start review' }).click();
+  await drawer.getByText('Moved to Under review.').waitFor();
+  await drawer.getByRole('button', { name: 'Approve' }).click();
+  await drawer.getByText('Moved to Approved.').waitFor();
+  await drawer.getByText('Approved is a final status. No further changes are possible.').waitFor();
+  if ((await drawer.getByText('by Asha Rao').count()) !== 2)
+    throw new Error('timeline should list both changes');
+  await capture(admin, 'lead-drawer', viewport);
+  await admin.keyboard.press('Escape');
+  await drawer.waitFor({ state: 'detached' });
+  const badge = admin.getByRole('table').locator('tbody tr').first().locator('.status-badge');
+  if ((await badge.innerText()).trim() !== 'APPROVED')
+    throw new Error('row badge should show the new status');
+  await admin.close();
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -278,15 +354,24 @@ for (const viewport of [
   await duplicatePage.getByText('You already applied on 3 Oct, application GL-1042.').waitFor();
   await capture(duplicatePage, 'apply-duplicate', viewport);
 
-  await duplicatePage
-    .getByRole('button', { name: viewport.width < 820 ? 'Open menu' : 'Ask Loan Assist' })
-    .click();
   if (viewport.width < 820) {
+    await duplicatePage.getByRole('button', { name: 'Open menu' }).click();
     await capture(duplicatePage, 'menu', viewport);
     await duplicatePage.getByRole('button', { name: 'Close menu' }).click();
-    await duplicatePage.locator('.nav__assist').click();
   }
+  // The floating button is visible on every page and is the main way into the chat.
+  const fab = duplicatePage.locator('.assist-fab');
+  const box = await fab.boundingBox();
+  if (
+    !box ||
+    box.x + box.width < viewport.width - 40 ||
+    box.y + box.height < viewport.height - 40
+  ) {
+    throw new Error('the Loan Assist button should float in the bottom-right corner');
+  }
+  await fab.click();
   await duplicatePage.getByRole('dialog', { name: 'Loan Assist' }).waitFor();
+  if (await fab.count()) throw new Error('the floating button should hide while the chat is open');
   await capture(duplicatePage, 'assist', viewport);
   await duplicatePage.close();
 }

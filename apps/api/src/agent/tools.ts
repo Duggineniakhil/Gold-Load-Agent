@@ -11,12 +11,13 @@ import { formatINR } from '../domain/money.js';
 import { maskMobile } from '../domain/mobile.js';
 import type { LoanSchemeRepository } from '../repositories/loan-scheme-repository.js';
 import { listActiveLoanSchemes } from '../services/loan-scheme-service.js';
+import type { GoldRateService } from '../services/gold-rate-service.js';
 import { createQuotes } from '../services/quote-service.js';
 import type { ToolDefinition } from './llm-client.js';
 
 export type ToolContext = {
   loanSchemeRepository: LoanSchemeRepository;
-  goldRatePaisePerGram: bigint;
+  goldRate: GoldRateService;
 };
 
 export type PendingApplication = { input: LeadRequest; summary: AgentApplicationSummary };
@@ -112,11 +113,8 @@ async function quoteView(
   },
   context: ToolContext,
 ) {
-  const quote = await createQuotes(
-    input,
-    context.loanSchemeRepository,
-    context.goldRatePaisePerGram,
-  );
+  const { ratePaisePerGram } = await context.goldRate.current();
+  const quote = await createQuotes(input, context.loanSchemeRepository, ratePaisePerGram);
   return {
     goldRatePerGram24k: formatINR(BigInt(quote.goldRatePerGram) * 100n),
     pureGoldGrams: quote.pureGoldGrams,

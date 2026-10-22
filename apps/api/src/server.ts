@@ -6,11 +6,14 @@ import { logger } from './logger.js';
 import { createLeadRepository } from './repositories/lead-repository.js';
 import { createLoanSchemeRepository } from './repositories/loan-scheme-repository.js';
 import { createAgentService } from './services/agent-service.js';
+import { createGoldRateService, mockGoldRateSource } from './services/gold-rate-service.js';
 
 const prisma = new PrismaClient({ datasourceUrl: env.DATABASE_URL });
 const loanSchemeRepository = createLoanSchemeRepository(prisma);
 const leadRepository = createLeadRepository(prisma);
-const goldRatePaisePerGram = env.GOLD_RATE_24K_PAISE_PER_GRAM;
+const goldRate = createGoldRateService({
+  source: mockGoldRateSource(env.GOLD_RATE_24K_PAISE_PER_GRAM),
+});
 
 const agent = env.LLM_API_KEY
   ? createAgentService({
@@ -22,13 +25,13 @@ const agent = env.LLM_API_KEY
       }),
       loanSchemeRepository,
       leadRepository,
-      goldRatePaisePerGram,
+      goldRate,
       logger,
     })
   : undefined;
 if (!agent) logger.warn('LLM_API_KEY is not set; Loan Assist is disabled.');
 
-const app = createApp({ loanSchemeRepository, leadRepository, goldRatePaisePerGram, agent });
+const app = createApp({ loanSchemeRepository, leadRepository, goldRate, agent });
 
 const server = app.listen(env.API_PORT, () => {
   logger.info({ port: env.API_PORT }, 'API server listening');

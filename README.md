@@ -46,6 +46,15 @@ Shared Zod schemas in `packages/shared/src/schemas.ts` validate Unicode names, I
 
 API Supertest coverage includes the seeded schemes, assignment quote examples, request validation, malformed JSON, unknown routes, and generic internal errors. Lead tests cover the server-side recalculation, 400/404/409 cases, the 7-day window and concurrent duplicate submissions.
 
+## Hardening (bonus B1)
+
+- **Idempotency-Key on `POST /api/v1/leads`.** The key (1–255 printable characters, e.g. a UUID), a SHA-256 hash of the canonical request body (keys sorted, so key order does not matter) and the 201 response are stored in `IdempotencyRecord`, in the same transaction that creates the lead. The same key with the same body replays the stored 201 with `Idempotency-Replayed: true`; the same key with a different body is `422 IDEMPOTENCY_KEY_REUSED`. Requests take PostgreSQL advisory locks on the key and the mobile number (always in the same order, so they cannot deadlock), so concurrent retries create exactly one lead. Only successful 201s are stored: a 400, 404 or 409 is not, so retrying it gives the same error. The Apply page sends a fresh key for each version of the form. Keys do not expire yet.
+- **Status workflow.** `PATCH /api/v1/leads/:applicationId/status` with `{ status, actor }` allows only SUBMITTED → UNDER_REVIEW → APPROVED or REJECTED (the map lives in `packages/shared`, so the API enforces and the UI offers the same moves). Anything else is `409 INVALID_TRANSITION` with `from`, `to` and the allowed moves. The update is conditional on the current status, so two simultaneous decisions cannot both win. Every transition writes a `LeadAuditLog` row (from, to, actor, at), returned by `GET /api/v1/leads/:applicationId/audit`. There is no login yet, so the actor is the name the admin types.
+- **Cached gold rate.** `GET /api/v1/gold-rate` returns the 24K rate with `asOf` and `cachedUntil`. The service caches for 60 seconds, shares one fetch between concurrent callers and does not cache failures. Quotes, leads and Loan Assist all read the rate from it, so they always agree. The source is still the mock ₹7,000/g from `GOLD_RATE_24K_PAISE_PER_GRAM`.
+- **Admin UI.** In the lead register, the application ID opens a drawer showing the status, buttons for the allowed next statuses (your name is required and remembered), and the full history.
+
+Tests: `apps/api/test/idempotency.test.ts` (spec case 7, key reuse, 5 concurrent retries × 10 rounds), `status.test.ts` (the full path, every illegal transition, 10 rounds of simultaneous approve/reject), `gold-rate.test.ts` (TTL with a fake clock, shared fetch, failures), and spec case 8 in `leads.test.ts`.
+
 ## Web app
 
 `apps/web` is a React + Vite single-page app with three routes:

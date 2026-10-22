@@ -8,9 +8,10 @@ type Props = {
   caption: string;
   /** Rows mounted while true fade in with a short stagger; later rows appear at once. */
   animateRows: boolean;
+  onOpen: (lead: LeadSummary) => void;
 };
 
-export function LeadsTable({ items, caption, animateRows }: Props) {
+export function LeadsTable({ items, caption, animateRows, onOpen }: Props) {
   return (
     <table className="register__table">
       <caption className="sr-only">{caption}</caption>
@@ -37,7 +38,14 @@ export function LeadsTable({ items, caption, animateRows }: Props) {
             transition={{ duration: 0.2, delay: animateRows ? Math.min(index * 0.035, 0.3) : 0 }}
           >
             <th scope="row" data-label="Application ID">
-              {lead.applicationId}
+              <button
+                type="button"
+                className="register__open"
+                onClick={() => onOpen(lead)}
+                aria-label={`${lead.applicationId}: view status and history`}
+              >
+                {lead.applicationId}
+              </button>
             </th>
             <td data-label="Name">{lead.name}</td>
             <td data-label="Mobile" className="is-mono">

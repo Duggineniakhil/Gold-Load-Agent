@@ -19,7 +19,12 @@ const lead = (overrides: Partial<LeadSummary>): LeadSummary => ({
 
 const render = (items: LeadSummary[]) =>
   renderToStaticMarkup(
-    <LeadsTable items={items} caption="Gold loan applications, newest first" animateRows={false} />,
+    <LeadsTable
+      items={items}
+      caption="Gold loan applications, newest first"
+      animateRows={false}
+      onOpen={() => undefined}
+    />,
   );
 
 const unmaskedMobile = /[6-9]\d{9}/;
@@ -47,6 +52,8 @@ describe('LeadsTable', () => {
       '<caption class="sr-only">Gold loan applications, newest first</caption>',
     );
     expect(html.match(/<th scope="col"/g)).toHaveLength(8);
-    expect(html).toContain('<th scope="row" data-label="Application ID">GL-1001</th>');
+    expect(html).toMatch(
+      /<th scope="row" data-label="Application ID"><button[^>]*>GL-1001<\/button><\/th>/,
+    );
   });
 });

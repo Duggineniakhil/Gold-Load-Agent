@@ -18,6 +18,26 @@ export function formatDate(iso: string, withYear = true): string {
   }).format(new Date(iso));
 }
 
+export function formatDateTime(iso: string): string {
+  return new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
+  }).format(new Date(iso));
+}
+
+const statusLabels: Record<string, string> = {
+  SUBMITTED: 'Submitted',
+  UNDER_REVIEW: 'Under review',
+  APPROVED: 'Approved',
+  REJECTED: 'Rejected',
+};
+
+export const statusLabel = (status: string) => statusLabels[status] ?? status;
+
 /** The 409 message the spec asks for: "You already applied on 3 Oct, application GL-1042." */
 export function duplicateMessage(existing: { applicationId: string; createdAt: string }): string {
   return `You already applied on ${formatDate(existing.createdAt, false)}, application ${existing.applicationId}.`;

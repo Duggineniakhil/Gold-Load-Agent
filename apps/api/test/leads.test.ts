@@ -11,7 +11,7 @@ import {
   closeTestDatabase,
   openTestDatabase,
 } from './helpers/database.js';
-import { seededSchemes } from './helpers/fixtures.js';
+import { fixedGoldRate, seededSchemes } from './helpers/fixtures.js';
 
 let prisma: PrismaClient;
 
@@ -28,7 +28,7 @@ const app = () =>
   createApp({
     loanSchemeRepository: createLoanSchemeRepository(prisma),
     leadRepository: createLeadRepository(prisma),
-    goldRatePaisePerGram: env.GOLD_RATE_24K_PAISE_PER_GRAM,
+    goldRate: fixedGoldRate(env.GOLD_RATE_24K_PAISE_PER_GRAM),
     logger: pino({ enabled: false }),
   });
 
@@ -162,7 +162,7 @@ describe('POST /api/v1/leads', () => {
     await request(app()).post('/api/v1/leads').send(basePayload).expect(201);
   });
 
-  it('creates exactly one lead for 2 and 10 concurrent requests, repeated 20 times', async () => {
+  it('spec case 8: parallel requests for a new mobile give exactly one 201, the rest 409 (2 and 10 at once, 20 rounds)', async () => {
     const api = app();
     for (let iteration = 0; iteration < 20; iteration += 1) {
       for (const count of [2, 10]) {

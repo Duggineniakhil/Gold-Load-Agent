@@ -18,7 +18,7 @@ import {
   unverifiedFiguresReply,
 } from '../src/services/agent-service.js';
 import { clearTestDatabase, closeTestDatabase, openTestDatabase } from './helpers/database.js';
-import { seededSchemes } from './helpers/fixtures.js';
+import { fixedGoldRate, seededSchemes } from './helpers/fixtures.js';
 
 let prisma: PrismaClient;
 
@@ -70,19 +70,19 @@ function setup(steps: Step[]) {
   const { llm, requests } = scriptedLlm(steps);
   const loanSchemeRepository = createLoanSchemeRepository(prisma);
   const leadRepository = createLeadRepository(prisma);
-  const goldRatePaisePerGram = env.GOLD_RATE_24K_PAISE_PER_GRAM;
+  const goldRate = fixedGoldRate(env.GOLD_RATE_24K_PAISE_PER_GRAM);
   const logger = pino({ enabled: false });
   const agent = createAgentService({
     llm,
     loanSchemeRepository,
     leadRepository,
-    goldRatePaisePerGram,
+    goldRate,
     logger,
   });
   const app = createApp({
     loanSchemeRepository,
     leadRepository,
-    goldRatePaisePerGram,
+    goldRate,
     agent,
     logger,
   });
@@ -363,7 +363,7 @@ describe('Loan Assist agent', () => {
     const app = createApp({
       loanSchemeRepository: createLoanSchemeRepository(prisma),
       leadRepository: createLeadRepository(prisma),
-      goldRatePaisePerGram: env.GOLD_RATE_24K_PAISE_PER_GRAM,
+      goldRate: fixedGoldRate(),
       logger: pino({ enabled: false }),
     });
 

@@ -1,4 +1,10 @@
-import { API_PREFIX, type LeadRequest, type QuoteRequest } from '@tglobal/shared';
+import {
+  API_PREFIX,
+  type LeadRequest,
+  type LeadStatus,
+  type QuoteRequest,
+  type StatusUpdateRequest,
+} from '@tglobal/shared';
 
 export type Plan = {
   id: string;
@@ -32,7 +38,7 @@ export type LeadSummary = {
   planId: string;
   planName: string;
   eligibleLoanPaise: number;
-  status: string;
+  status: LeadStatus;
   createdAt: string;
 };
 
@@ -49,6 +55,20 @@ export type SubmittedLead = {
     goldValuePaise: number;
     pureGoldGrams: string;
   };
+};
+
+export type AuditEntry = { from: LeadStatus; to: LeadStatus; actor: string; at: string };
+export type LeadAudit = {
+  applicationId: string;
+  status: LeadStatus;
+  submittedAt: string;
+  entries: AuditEntry[];
+};
+export type StatusChange = {
+  applicationId: string;
+  status: LeadStatus;
+  updatedAt: string;
+  entry: AuditEntry;
 };
 
 export type FieldError = { field: string; message: string };
@@ -91,9 +111,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-const postJson = (body: unknown, signal?: AbortSignal): RequestInit => ({
+const postJson = (
+  body: unknown,
+  signal?: AbortSignal,
+  headers: Record<string, string> = {},
+): RequestInit => ({
   method: 'POST',
-  headers: { 'content-type': 'application/json' },
+  headers: { 'content-type': 'application/json', ...headers },
   body: JSON.stringify(body),
   ...(signal ? { signal } : {}),
 });
@@ -102,7 +126,19 @@ export const api = {
   plans: () => request<Plan[]>('/loan-schemes'),
   quote: (input: QuoteRequest, signal?: AbortSignal) =>
     request<Quote>('/quotes', postJson(input, signal)),
-  submitLead: (input: LeadRequest) => request<SubmittedLead>('/leads', postJson(input)),
+  /** The key makes retries of one submission safe: the server replays the first response. */
+  submitLead: (input: LeadRequest, idempotencyKey: string) =>
+    request<SubmittedLead>(
+      '/leads',
+      postJson(input, undefined, { 'Idempotency-Key': idempotencyKey }),
+    ),
+  updateStatus: (applicationId: string, change: StatusUpdateRequest) =>
+    request<StatusChange>(`/leads/${encodeURIComponent(applicationId)}/status`, {
+      ...postJson(change),
+      method: 'PATCH',
+    }),
+  audit: (applicationId: string) =>
+    request<LeadAudit>(`/leads/${encodeURIComponent(applicationId)}/audit`),
   leads: ({ planId, cursor }: { planId: string; cursor?: string | null }) => {
     const query = new URLSearchParams({ limit: String(LEADS_PAGE_SIZE) });
     if (planId) query.set('planId', planId);

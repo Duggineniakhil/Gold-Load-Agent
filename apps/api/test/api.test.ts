@@ -2,6 +2,7 @@ import pino from 'pino';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
+import { fixedGoldRate } from './helpers/fixtures.js';
 import type { LoanSchemeRecord } from '../src/repositories/loan-scheme-repository.js';
 
 const seededSchemes: LoanSchemeRecord[] = [
@@ -28,12 +29,15 @@ function makeApp(findActive = async () => seededSchemes) {
     loanSchemeRepository: { findActive },
     leadRepository: {
       findScheme: async () => null,
-      withMobileLock: async () => {
+      withLocks: async () => {
         throw new Error('No lead repository configured for this test.');
       },
       list: async () => [],
+      findStatus: async () => null,
+      transitionStatus: async () => null,
+      auditLog: async () => [],
     },
-    goldRatePaisePerGram: 700000n,
+    goldRate: fixedGoldRate(),
     logger: pino({ enabled: false }),
   });
 }

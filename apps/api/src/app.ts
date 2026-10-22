@@ -5,9 +5,11 @@ import { z, ZodError } from 'zod';
 import {
   agentConfirmRequestSchema,
   agentMessageRequestSchema,
+  idempotencyKeySchema,
   leadRequestSchema,
   planIdSchema,
   quoteRequestSchema,
+  statusUpdateRequestSchema,
   API_PREFIX,
 } from '@tglobal/shared';
 import type { Logger } from 'pino';
@@ -15,7 +17,13 @@ import type { LeadRepository } from './repositories/lead-repository.js';
 import type { LoanSchemeRepository } from './repositories/loan-scheme-repository.js';
 import type { AgentService } from './services/agent-service.js';
 import { listActiveLoanSchemes } from './services/loan-scheme-service.js';
-import { listLeads, submitLead } from './services/lead-service.js';
+import type { GoldRateService } from './services/gold-rate-service.js';
+import {
+  getLeadAudit,
+  listLeads,
+  submitLeadRequest,
+  updateLeadStatus,
+} from './services/lead-service.js';
 import { createQuotes } from './services/quote-service.js';
 import { AppError, NotFoundError, ValidationError } from './errors.js';
 import { logger as defaultLogger } from './logger.js';
@@ -23,7 +31,7 @@ import { logger as defaultLogger } from './logger.js';
 export type AppDependencies = {
   loanSchemeRepository: LoanSchemeRepository;
   leadRepository: LeadRepository;
-  goldRatePaisePerGram: bigint;
+  goldRate: GoldRateService;
   /** Absent when no LLM key is configured; the agent routes then answer 503. */
   agent?: AgentService | undefined;
   logger?: Logger;
@@ -41,9 +49,23 @@ function parseOrThrow<T extends z.ZodType>(schema: T, value: unknown): z.infer<T
   return parsed.data;
 }
 
+function parseHeader<T extends z.ZodType>(schema: T, value: string, header: string): z.infer<T> {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    throw new ValidationError('Request validation failed.', [
+      { field: header, message: parsed.error.issues[0]?.message ?? 'Invalid header.' },
+    ]);
+  }
+  return parsed.data;
+}
+
 function requireAgent(agent: AgentService | undefined): AgentService {
   if (!agent) {
-    throw new AppError(503, 'AGENT_NOT_CONFIGURED', 'Loan Assist is not configured on this server. Set LLM_API_KEY.');
+    throw new AppError(
+      503,
+      'AGENT_NOT_CONFIGURED',
+      'Loan Assist is not configured on this server. Set LLM_API_KEY.',
+    );
   }
   return agent;
 }
@@ -56,9 +78,8 @@ export function createApp(deps: AppDependencies) {
       logger: deps.logger ?? defaultLogger,
       genReqId(request, response) {
         const supplied = request.headers['x-request-id'];
-        const requestId = typeof supplied === 'string' && /^[\w-]{1,128}$/.test(supplied)
-          ? supplied
-          : randomUUID();
+        const requestId =
+          typeof supplied === 'string' && /^[\w-]{1,128}$/.test(supplied) ? supplied : randomUUID();
         response.setHeader('x-request-id', requestId);
         return requestId;
       },
@@ -76,12 +97,24 @@ export function createApp(deps: AppDependencies) {
 
   app.post(`${API_PREFIX}/quotes`, async (request, response) => {
     const input = parseOrThrow(quoteRequestSchema, request.body);
-    response.json(await createQuotes(input, deps.loanSchemeRepository, deps.goldRatePaisePerGram));
+    const { ratePaisePerGram } = await deps.goldRate.current();
+    response.json(await createQuotes(input, deps.loanSchemeRepository, ratePaisePerGram));
   });
 
   app.post(`${API_PREFIX}/leads`, async (request, response) => {
     const input = parseOrThrow(leadRequestSchema, request.body);
-    response.status(201).json(await submitLead(input, deps.leadRepository, deps.goldRatePaisePerGram));
+    const key = request.get('Idempotency-Key');
+    const idempotencyKey =
+      key === undefined ? undefined : parseHeader(idempotencyKeySchema, key, 'Idempotency-Key');
+    const { ratePaisePerGram } = await deps.goldRate.current();
+    const { response: body, replayed } = await submitLeadRequest(
+      input,
+      deps.leadRepository,
+      ratePaisePerGram,
+      idempotencyKey ? { key: idempotencyKey, body: request.body } : undefined,
+    );
+    if (replayed) response.setHeader('Idempotency-Replayed', 'true');
+    response.status(201).json(body);
   });
 
   app.get(`${API_PREFIX}/leads`, async (request, response) => {
@@ -92,6 +125,29 @@ export function createApp(deps: AppDependencies) {
     });
     const query = parseOrThrow(querySchema, request.query);
     response.json(await listLeads(deps.leadRepository, query));
+  });
+
+  app.patch(`${API_PREFIX}/leads/:applicationId/status`, async (request, response) => {
+    const update = parseOrThrow(statusUpdateRequestSchema, request.body);
+    response.json(
+      await updateLeadStatus(request.params.applicationId, update, deps.leadRepository),
+    );
+  });
+
+  app.get(`${API_PREFIX}/leads/:applicationId/audit`, async (request, response) => {
+    response.json(await getLeadAudit(request.params.applicationId, deps.leadRepository));
+  });
+
+  app.get(`${API_PREFIX}/gold-rate`, async (_request, response) => {
+    const rate = await deps.goldRate.current();
+    response.json({
+      ratePerGram24k: Number(rate.ratePaisePerGram / 100n),
+      ratePaisePerGram24k: Number(rate.ratePaisePerGram),
+      currency: 'INR',
+      source: rate.source,
+      asOf: rate.asOf.toISOString(),
+      cachedUntil: rate.cachedUntil.toISOString(),
+    });
   });
 
   app.post(`${API_PREFIX}/agent/messages`, async (request, response) => {

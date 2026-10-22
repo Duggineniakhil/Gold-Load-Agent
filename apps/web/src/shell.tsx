@@ -41,7 +41,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const assist = useLoanAssist();
   const reduceMotion = useReducedMotion();
-  const assistTrigger = useRef<HTMLButtonElement>(null);
   const assistClose = useRef<HTMLButtonElement>(null);
   const location = useLocation();
   useScrollOnNavigate();
@@ -50,7 +49,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!assistOpen) return;
-    const trigger = assistTrigger.current;
+    // Return focus to whichever button opened the chat (nav or floating).
+    const trigger = document.activeElement as HTMLElement | null;
     assistClose.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setAssistOpen(false);
@@ -87,12 +87,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </li>
             ))}
           </ul>
-          <button
-            ref={assistTrigger}
-            type="button"
-            className="nav__assist"
-            onClick={() => setAssistOpen(true)}
-          >
+          <button type="button" className="nav__assist" onClick={() => setAssistOpen(true)}>
             <span>Ask Loan Assist</span>
             <span className="orb" aria-hidden="true" />
           </button>
@@ -129,6 +124,22 @@ export function AppShell({ children }: { children: ReactNode }) {
           </p>
         </div>
       </footer>
+
+      {!assistOpen && (
+        <button
+          type="button"
+          className="assist-fab"
+          onClick={() => setAssistOpen(true)}
+          aria-label="Ask Loan Assist"
+        >
+          <span className="assist-fab__icon" aria-hidden="true">
+            <Icon name="chat" />
+          </span>
+          <span className="assist-fab__label" aria-hidden="true">
+            Ask Loan Assist
+          </span>
+        </button>
+      )}
 
       <AnimatePresence>
         {assistOpen && (
