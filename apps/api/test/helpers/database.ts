@@ -1,14 +1,7 @@
-import { execFileSync } from 'node:child_process';
-import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 import { env } from '../../src/config/env.js';
+import { deployMigrations } from '../../scripts/prisma-cli.js';
 
-const require = createRequire(import.meta.url);
-const apiDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const schemaPath = resolve(apiDirectory, 'prisma/schema.prisma');
-const prismaCliPath = require.resolve('prisma');
 const testUrl = new URL(env.TEST_DATABASE_URL);
 const testDatabaseName = testUrl.pathname.replace(/^\/+/, '');
 
@@ -17,15 +10,7 @@ if (!testDatabaseName.endsWith('_test')) {
 }
 
 export async function openTestDatabase(): Promise<PrismaClient> {
-  execFileSync(
-    process.execPath,
-    [prismaCliPath, 'migrate', 'deploy', '--schema', schemaPath],
-    {
-      cwd: apiDirectory,
-      env: { ...process.env, DATABASE_URL: env.TEST_DATABASE_URL },
-      stdio: 'inherit',
-    },
-  );
+  deployMigrations(env.TEST_DATABASE_URL);
 
   const client = new PrismaClient({ datasourceUrl: env.TEST_DATABASE_URL });
   await client.$connect();

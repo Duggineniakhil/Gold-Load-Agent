@@ -1,10 +1,10 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import { env } from '../src/config/env.js';
 
 const prisma = new PrismaClient({ datasourceUrl: env.DATABASE_URL });
 
 async function main() {
-  const schemes = [
+  const schemes: Prisma.LoanSchemeCreateInput[] = [
     {
       id: 'PLAN_BULLET_01',
       name: 'Bullet Repayment',

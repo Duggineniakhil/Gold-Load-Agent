@@ -4,7 +4,10 @@ import { mobileNumberSchema, nameSchema, quoteRequestSchema } from '../src/schem
 describe('shared request schemas', () => {
   it('trims and collapses names while accepting unicode letters', () => {
     expect(nameSchema.parse('  Élodie   कुमार  ')).toBe('Élodie कुमार');
+    expect(nameSchema.parse('अखिल दुग्गिनेनी')).toBe('अखिल दुग्गिनेनी');
+    expect(nameSchema.parse('Élodie')).toBe('Élodie');
     expect(nameSchema.safeParse('Akhil123').success).toBe(false);
+    expect(nameSchema.safeParse('िा').success).toBe(false);
   });
 
   it('validates Indian mobile numbers exactly', () => {

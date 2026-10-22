@@ -58,7 +58,7 @@ export function createLeadRepository(prisma: PrismaClient): LeadRepository {
       }),
     list: async ({ limit, cursor, planId }) => {
       const rows = await prisma.lead.findMany({
-        where: planId ? { schemeId: planId } : undefined,
+        ...(planId ? { where: { schemeId: planId } } : {}),
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         take: limit + 1,

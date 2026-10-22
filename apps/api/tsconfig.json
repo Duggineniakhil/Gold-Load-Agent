@@ -7,5 +7,5 @@
     "rootDir": ".",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "prisma/**/*.ts", "scripts/**/*.ts"]
 }

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-const namePattern = /^[\p{L} ]+$/u;
+// Each word starts with a letter; combining marks (\p{M}) are needed for Indic scripts, e.g. the vowel signs in कुमार.
+const namePattern = /^\p{L}[\p{L}\p{M}]*(?: \p{L}[\p{L}\p{M}]*)*$/u;
 const mobilePattern = /^[6-9]\d{9}$/;
 const gramsPattern = /^(?:\d+)(?:\.\d{1,3})?$/;
 
@@ -22,7 +23,7 @@ function validateGrams(value: string | number, ctx: z.RefinementCtx) {
 
 export const nameSchema = z
   .string()
-  .transform((value) => value.trim().replace(/ {2,}/g, ' '))
+  .transform((value) => value.normalize('NFC').trim().replace(/ {2,}/g, ' '))
   .pipe(z.string().min(2).max(60).regex(namePattern, 'Use letters and spaces only.'));
 
 export const mobileNumberSchema = z.string().regex(mobilePattern, 'Enter a valid 10-digit Indian mobile number.');

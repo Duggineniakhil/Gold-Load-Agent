@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import express from 'express';
-import pinoHttp from 'pino-http';
+import { pinoHttp } from 'pino-http';
 import { ZodError } from 'zod';
 import { leadRequestSchema, planIdSchema, quoteRequestSchema, API_PREFIX } from '@tglobal/shared';
 import { z } from 'zod';
