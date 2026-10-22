@@ -46,6 +46,16 @@ Shared Zod schemas in `packages/shared/src/schemas.ts` validate Unicode names, I
 
 API Supertest coverage includes the seeded schemes, assignment quote examples, request validation, malformed JSON, unknown routes, and generic internal errors. Lead tests cover the server-side recalculation, 400/404/409 cases, the 7-day window and concurrent duplicate submissions.
 
+## Web app
+
+`apps/web` is a React + Vite single-page app with three routes:
+
+- `/` explains how offers work. Every figure on it (rate, plan terms, the 45 g · 22K worked example) is fetched from the API, not hard-coded.
+- `/apply` is the three-step application: details with inline validation as you type (the shared Zod schemas), a live quote re-requested about 300 ms after typing stops with selectable plan cards, then review and submit. A 409 shows "You already applied on 3 Oct, application GL-1042."; API field errors return the user to the right step.
+- `/leads` is the lead register: newest first, masked mobiles, filter by plan, stacked cards on phones.
+
+`npm run screenshot --workspace=@tglobal/web` (with the dev server running and `PLAYWRIGHT_BROWSERS_PATH` pointing at your Playwright browsers) walks every page and the full application flow, including the 409 path, at 375 px and 1440 px against a mocked API, fails on horizontal overflow and saves screenshots to `apps/web/artifacts/design-system`.
+
 ## Loan Assist (AI agent)
 
 The chat panel ("Ask Loan Assist") talks only to the API; the LLM key never reaches the browser. The agent uses Gemini through its OpenAI-compatible chat-completions endpoint with plain `fetch`, so no SDK dependency is needed.

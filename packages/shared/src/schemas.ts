@@ -22,15 +22,29 @@ function validateGrams(value: string | number, ctx: z.RefinementCtx) {
 }
 
 export const nameSchema = z
-  .string()
+  .string({ error: 'Enter the full name.' })
   .transform((value) => value.normalize('NFC').trim().replace(/ {2,}/g, ' '))
-  .pipe(z.string().min(2).max(60).regex(namePattern, 'Use letters and spaces only.'));
+  .pipe(
+    z
+      .string()
+      .min(2, 'Enter at least 2 characters.')
+      .max(60, 'Keep the name to 60 characters or fewer.')
+      .regex(namePattern, 'Use letters and spaces only.'),
+  );
 
-export const mobileNumberSchema = z.string().regex(mobilePattern, 'Enter a valid 10-digit Indian mobile number.');
-export const grossWeightGramsSchema = z.union([z.string(), z.number().finite()]).superRefine(validateGrams);
-export const netWeightGramsSchema = z.union([z.string(), z.number().finite()]).superRefine(validateGrams);
-export const karatSchema = z.union([z.literal(18), z.literal(22), z.literal(24)]);
-export const planIdSchema = z.string().min(1);
+export const mobileNumberSchema = z
+  .string({ error: 'Enter a mobile number.' })
+  .regex(mobilePattern, 'Enter a valid 10-digit Indian mobile number.');
+export const grossWeightGramsSchema = z
+  .union([z.string(), z.number().finite()], { error: 'Enter the gross weight in grams.' })
+  .superRefine(validateGrams);
+export const netWeightGramsSchema = z
+  .union([z.string(), z.number().finite()], { error: 'Enter the net gold weight in grams.' })
+  .superRefine(validateGrams);
+export const karatSchema = z.union([z.literal(18), z.literal(22), z.literal(24)], {
+  error: 'Choose 18, 22 or 24 karat.',
+});
+export const planIdSchema = z.string({ error: 'Choose a plan.' }).min(1, 'Choose a plan.');
 
 function validateWeightOrder(
   value: { netWeightGrams: string | number; grossWeightGrams: string | number },

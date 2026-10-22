@@ -155,7 +155,7 @@ function SummaryCard({
         <strong>{summary.eligibleLoan}</strong>
       </div>
       <div className="assist-summary__actions">
-        <Button tone="quiet" type="button" disabled={busy} onClick={() => onSettle(false)}>
+        <Button tone="outline" type="button" disabled={busy} onClick={() => onSettle(false)}>
           Cancel
         </Button>
         <Button type="button" disabled={busy} onClick={() => onSettle(true)}>
