@@ -26,7 +26,6 @@ export const fixedGoldRate = (ratePaisePerGram = 700000n) =>
 
 /** A lead repository for tests that never reach the database; override what a test needs. */
 export const fakeLeadRepository = (overrides: Partial<LeadRepository> = {}): LeadRepository => ({
-  findScheme: async () => null,
   withLocks: async () => {
     throw new Error('No lead repository configured for this test.');
   },

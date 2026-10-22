@@ -174,6 +174,32 @@ describe('POST /api/v1/leads', () => {
     await request(app()).post('/api/v1/leads').send(basePayload).expect(201);
   });
 
+  it('stays correct on a 2-connection pool: lookups inside the lock never need a second connection', async () => {
+    // Small CI runners get a small Prisma pool. A query outside the locked transaction once
+    // starved the pool and turned every parallel request into a 500 after Prisma's 5 s timeout.
+    const url = new URL(env.TEST_DATABASE_URL);
+    url.searchParams.set('connection_limit', '2');
+    const smallPool = new PrismaClient({ datasourceUrl: url.toString() });
+    try {
+      const api = createApp({
+        loanSchemeRepository: createLoanSchemeRepository(smallPool),
+        leadRepository: createLeadRepository(smallPool),
+        goldRate: fixedGoldRate(env.GOLD_RATE_24K_PAISE_PER_GRAM),
+        logger: pino({ enabled: false }),
+      });
+      const responses = await Promise.all(
+        Array.from({ length: 10 }, () =>
+          request(api)
+            .post('/api/v1/leads')
+            .send({ ...basePayload, mobileNumber: '9555500001' }),
+        ),
+      );
+      expect(responses.map(({ status }) => status).sort()).toEqual([201, ...Array(9).fill(409)]);
+    } finally {
+      await smallPool.$disconnect();
+    }
+  }, 30000);
+
   it('spec case 8: parallel requests for a new mobile give exactly one 201, the rest 409 (2 and 10 at once, 20 rounds)', async () => {
     const api = app();
     for (let iteration = 0; iteration < 20; iteration += 1) {

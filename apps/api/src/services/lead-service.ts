@@ -98,7 +98,7 @@ export async function submitLeadRequest(
       }
     }
 
-    const scheme = await repository.findScheme(input.planId);
+    const scheme = await transaction.findScheme(input.planId);
     if (!scheme) throw new NotFoundError('Loan scheme not found.', 'PLAN_NOT_FOUND');
 
     const existing = await transaction.findRecentByMobile(input.mobileNumber);

@@ -20,6 +20,11 @@ export type StoredIdempotentResponse = {
 };
 
 export interface LeadTransaction {
+  /**
+   * Reads go through the transaction's own connection. A query on the main client here would
+   * need a second pooled connection while holding the lock, and with the pool busy that deadlocks.
+   */
+  findScheme(planId: string): Promise<SchemeForLead | null>;
   findRecentByMobile(mobileNumber: string): Promise<ExistingLead | null>;
   create(data: Prisma.LeadUncheckedCreateInput): Promise<LeadWithScheme>;
   findIdempotencyRecord(key: string): Promise<StoredIdempotentResponse | null>;
@@ -49,7 +54,6 @@ export type LeadStatusInfo = Pick<Lead, 'id' | 'applicationId' | 'status' | 'cre
 export type RecentApplication = Pick<Lead, 'applicationId' | 'status' | 'createdAt'>;
 
 export interface LeadRepository {
-  findScheme(planId: string): Promise<SchemeForLead | null>;
   /**
    * Runs `operation` in one transaction holding PostgreSQL advisory locks on every key.
    * Keys are locked in sorted order so two requests can never deadlock each other.
@@ -81,24 +85,24 @@ export interface LeadRepository {
 
 export function createLeadRepository(prisma: PrismaClient): LeadRepository {
   return {
-    findScheme: (id) =>
-      prisma.loanScheme.findUnique({
-        where: { id, isActive: true },
-        select: {
-          id: true,
-          name: true,
-          repaymentType: true,
-          annualInterestBps: true,
-          tenureMonths: true,
-          maxLtvBps: true,
-        },
-      }),
     withLocks: (lockKeys, operation) =>
       prisma.$transaction(async (tx) => {
         for (const key of [...new Set(lockKeys)].sort()) {
           await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))::text AS lock_acquired`;
         }
         return operation({
+          findScheme: (id) =>
+            tx.loanScheme.findUnique({
+              where: { id, isActive: true },
+              select: {
+                id: true,
+                name: true,
+                repaymentType: true,
+                annualInterestBps: true,
+                tenureMonths: true,
+                maxLtvBps: true,
+              },
+            }),
           findRecentByMobile: async (mobile) => {
             const rows = await tx.$queryRaw<ExistingLead[]>`
               SELECT "applicationId", "createdAt"
