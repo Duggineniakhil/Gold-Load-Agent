@@ -1,19 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { AnimatePresence, useReducedMotion } from 'motion/react';
 import type { LeadStatus } from '@tglobal/shared';
-import { api, type LeadSummary } from '../lib/api';
-import { usePlans } from '../lib/hooks';
-import { Button, ButtonLink, Icon, PageHeader, Skeleton } from '../ui';
+import { api, ApiError, type LeadSummary, type Plan } from '../lib/api';
+import { Button, Icon, Skeleton } from '../ui';
 import { LeadDrawer } from './lead-drawer';
 import { LeadsTable } from './leads-table';
 
 type Status = 'loading' | 'ready' | 'error';
 
-export function LeadsPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const planId = searchParams.get('planId') ?? '';
-  const { plans, loading: plansLoading } = usePlans();
+type Props = {
+  planId: string;
+  plans: Plan[];
+  plansLoading: boolean;
+  onPlanChange: (planId: string) => void;
+  /** Called after a status change in the drawer, so totals elsewhere can refresh. */
+  onStatusChange: () => void;
+  /** Called when the API asks for the admin passcode again. */
+  onUnauthorized: () => void;
+};
+
+/** The admin lead register: plan filter, newest-first table, Load more, and the status drawer. */
+export function LeadRegister({
+  planId,
+  plans,
+  plansLoading,
+  onPlanChange,
+  onStatusChange,
+  onUnauthorized,
+}: Props) {
   const [items, setItems] = useState<LeadSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>('loading');
@@ -26,20 +41,15 @@ export function LeadsPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const openLead = items.find((lead) => lead.applicationId === openId) ?? null;
   const closeDrawer = useCallback(() => setOpenId(null), []);
-  const updateRowStatus = useCallback((applicationId: string, status: LeadStatus) => {
-    setItems((current) =>
-      current.map((lead) => (lead.applicationId === applicationId ? { ...lead, status } : lead)),
-    );
-  }, []);
-
-  const setPlanFilter = (value: string) => setSearchParams(value ? { planId: value } : {});
-
-  // A plan id in the URL that no longer exists falls back to all plans.
-  useEffect(() => {
-    if (!plansLoading && planId && plans.length && !plans.some((plan) => plan.id === planId)) {
-      setSearchParams({}, { replace: true });
-    }
-  }, [plansLoading, plans, planId, setSearchParams]);
+  const updateRowStatus = useCallback(
+    (applicationId: string, status: LeadStatus) => {
+      setItems((current) =>
+        current.map((lead) => (lead.applicationId === applicationId ? { ...lead, status } : lead)),
+      );
+      onStatusChange();
+    },
+    [onStatusChange],
+  );
 
   useEffect(() => {
     let active = true;
@@ -56,13 +66,17 @@ export function LeadsPage() {
       })
       .catch((reason: unknown) => {
         if (!active) return;
+        if (reason instanceof ApiError && reason.status === 401) {
+          onUnauthorized();
+          return;
+        }
         setError(reason instanceof Error ? reason.message : 'Applications could not be loaded.');
         setStatus('error');
       });
     return () => {
       active = false;
     };
-  }, [planId, reloadKey]);
+  }, [planId, reloadKey, onUnauthorized]);
 
   // Only the first batch of rows animates in; filter changes and "Load more" do not.
   useEffect(() => {
@@ -90,19 +104,7 @@ export function LeadsPage() {
   const caption = `Gold loan applications${planName ? ` on the ${planName} plan` : ''}, newest first`;
 
   return (
-    <div className="page leads">
-      <PageHeader
-        pill="Lead register"
-        title="Applications"
-        action={
-          <ButtonLink to="/apply">
-            New application <Icon name="arrow" />
-          </ButtonLink>
-        }
-      >
-        Every application, newest first. Mobile numbers are masked.
-      </PageHeader>
-
+    <>
       <div className="card register">
         <div className="register__toolbar">
           <p aria-live="polite">
@@ -116,11 +118,12 @@ export function LeadsPage() {
               <strong>—</strong>
             )}
           </p>
-          <label className="register__filter">
-            Plan
+          <div className="register__filter">
+            <label htmlFor="register-plan">Plan</label>
             <select
+              id="register-plan"
               value={planId}
-              onChange={(event) => setPlanFilter(event.target.value)}
+              onChange={(event) => onPlanChange(event.target.value)}
               disabled={plansLoading}
             >
               <option value="">All plans</option>
@@ -130,7 +133,7 @@ export function LeadsPage() {
                 </option>
               ))}
             </select>
-          </label>
+          </div>
         </div>
 
         {status === 'loading' ? (
@@ -151,7 +154,7 @@ export function LeadsPage() {
             <span>Submitted applications appear here, newest first.</span>
             <div className="register__empty-actions">
               {planName && (
-                <Button tone="outline" onClick={() => setPlanFilter('')}>
+                <Button tone="outline" onClick={() => onPlanChange('')}>
                   Show all plans
                 </Button>
               )}
@@ -188,6 +191,6 @@ export function LeadsPage() {
           <LeadDrawer lead={openLead} onClose={closeDrawer} onStatusChange={updateRowStatus} />
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 }

@@ -107,3 +107,63 @@ export function formatINR(paise: number | bigint): string {
   }
   return indianRupeeFormatter.format(BigInt(paise) / 100n);
 }
+
+export type RepaymentInput = {
+  principalPaise: bigint;
+  annualInterestBps: number;
+  tenureMonths: number;
+  repaymentType: 'EMI' | 'BULLET';
+};
+
+export type Repayment = {
+  /** Null for bullet loans, which repay everything at maturity. */
+  monthlyInstalmentPaise: bigint | null;
+  totalInterestPaise: bigint;
+  totalPayablePaise: bigint;
+};
+
+/**
+ * Illustrative repayment for a principal, in exact integer paise.
+ * EMI (reducing balance): with monthly rate r = bps / 120000,
+ *   EMI = P·r·(1+r)^n / ((1+r)^n − 1) = P·a·(b+a)^n / (b·((b+a)^n − b^n)),  a = bps, b = 120000,
+ * evaluated as one fraction and rounded half-up to the paise once.
+ * Bullet: simple interest for the term, P·bps·n / 120000, rounded half-up, paid with the principal.
+ */
+export function estimateRepayment({
+  principalPaise,
+  annualInterestBps,
+  tenureMonths,
+  repaymentType,
+}: RepaymentInput): Repayment {
+  if (principalPaise <= 0n) throw new RangeError('principalPaise must be positive.');
+  if (!Number.isSafeInteger(annualInterestBps) || annualInterestBps < 0) {
+    throw new RangeError('annualInterestBps must be a non-negative safe integer.');
+  }
+  if (!Number.isSafeInteger(tenureMonths) || tenureMonths <= 0) {
+    throw new RangeError('tenureMonths must be a positive safe integer.');
+  }
+
+  const a = BigInt(annualInterestBps);
+  const b = 120000n;
+  const n = BigInt(tenureMonths);
+
+  if (repaymentType === 'BULLET') {
+    const totalInterestPaise = roundHalfUp(principalPaise * a * n, b);
+    return {
+      monthlyInstalmentPaise: null,
+      totalInterestPaise,
+      totalPayablePaise: principalPaise + totalInterestPaise,
+    };
+  }
+
+  const monthlyInstalmentPaise =
+    a === 0n
+      ? roundHalfUp(principalPaise, n)
+      : roundHalfUp(principalPaise * a * (b + a) ** n, b * ((b + a) ** n - b ** n));
+  const totalPayablePaise = monthlyInstalmentPaise * n;
+  return {
+    monthlyInstalmentPaise,
+    totalInterestPaise: totalPayablePaise - principalPaise,
+    totalPayablePaise,
+  };
+}

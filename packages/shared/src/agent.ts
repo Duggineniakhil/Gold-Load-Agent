@@ -1,4 +1,5 @@
-export type AgentToolName = 'get_loan_schemes' | 'calculate_quote' | 'submit_application';
+export type AgentToolName =
+  'get_loan_schemes' | 'calculate_quote' | 'check_existing_application' | 'submit_application';
 
 export type AgentToolEvent = { tool: AgentToolName | 'unknown'; ok: boolean };
 

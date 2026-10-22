@@ -1,4 +1,5 @@
 import {
+  existingApplicationRequestSchema,
   leadRequestSchema,
   quoteRequestSchema,
   type AgentApplicationSummary,
@@ -9,6 +10,7 @@ import type { ZodError } from 'zod';
 import { numberTokens } from './number-guard.js';
 import { formatINR } from '../domain/money.js';
 import { maskMobile } from '../domain/mobile.js';
+import type { LeadRepository } from '../repositories/lead-repository.js';
 import type { LoanSchemeRepository } from '../repositories/loan-scheme-repository.js';
 import { listActiveLoanSchemes } from '../services/loan-scheme-service.js';
 import type { GoldRateService } from '../services/gold-rate-service.js';
@@ -17,6 +19,7 @@ import type { ToolDefinition } from './llm-client.js';
 
 export type ToolContext = {
   loanSchemeRepository: LoanSchemeRepository;
+  leadRepository: LeadRepository;
   goldRate: GoldRateService;
 };
 
@@ -29,6 +32,11 @@ export type ToolOutcome = {
   result: unknown;
   pending?: PendingApplication;
 };
+
+const dateFormatter = new Intl.DateTimeFormat('en-IN', {
+  dateStyle: 'medium',
+  timeZone: 'Asia/Kolkata',
+});
 
 const weightProperty = (description: string) => ({
   type: 'string',
@@ -62,6 +70,24 @@ export const toolDefinitions: ToolDefinition[] = [
         type: 'object',
         properties: quoteProperties,
         required: ['netWeightGrams', 'grossWeightGrams', 'karat'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_existing_application',
+      description:
+        'Check whether the borrower already applied with this mobile number in the last 7 days. Call it once you have their mobile number, before preparing an application.',
+      parameters: {
+        type: 'object',
+        properties: {
+          mobileNumber: {
+            type: 'string',
+            description: 'Indian 10-digit mobile number the borrower gave.',
+          },
+        },
+        required: ['mobileNumber'],
       },
     },
   },
@@ -178,7 +204,11 @@ export async function runTool(
     };
   }
 
-  if (name === 'calculate_quote' || name === 'submit_application') {
+  if (
+    name === 'calculate_quote' ||
+    name === 'submit_application' ||
+    name === 'check_existing_application'
+  ) {
     const missing = ungroundedFields(args as Record<string, unknown>, borrowerText);
     if (missing.length > 0) {
       return {
@@ -205,6 +235,24 @@ export async function runTool(
       const parsed = quoteRequestSchema.safeParse(args);
       if (!parsed.success) return validationFailure(name, parsed.error);
       return { tool: name, ok: true, result: await quoteView(parsed.data, context) };
+    }
+    case 'check_existing_application': {
+      const parsed = existingApplicationRequestSchema.safeParse(args);
+      if (!parsed.success) return validationFailure(name, parsed.error);
+      const existing = await context.leadRepository.findRecentApplication(parsed.data.mobileNumber);
+      if (!existing) return { tool: name, ok: true, result: { hasRecentApplication: false } };
+      const reopensOn = new Date(existing.createdAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+      return {
+        tool: name,
+        ok: true,
+        result: {
+          hasRecentApplication: true,
+          applicationId: existing.applicationId,
+          appliedOn: dateFormatter.format(existing.createdAt),
+          status: existing.status,
+          newApplicationAllowedAfter: dateFormatter.format(reopensOn),
+        },
+      };
     }
     case 'submit_application': {
       const parsed = leadRequestSchema.safeParse(args);

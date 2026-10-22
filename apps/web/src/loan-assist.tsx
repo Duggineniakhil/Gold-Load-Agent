@@ -19,6 +19,7 @@ type Entry = {
 const toolLabels: Record<AgentToolEvent['tool'], string> = {
   get_loan_schemes: 'Checked plans',
   calculate_quote: 'Calculated quote',
+  check_existing_application: 'Checked past applications',
   submit_application: 'Prepared summary',
   unknown: 'Unknown tool',
 };

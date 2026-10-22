@@ -9,6 +9,13 @@ export function formatRupees(paise: number): string {
   return rupees.format(Math.trunc(paise / 100));
 }
 
+/** Rupees with paise, built from integers (₹8,814.86); used where paise matter, like an EMI. */
+export function formatRupeesWithPaise(paise: number): string {
+  const sign = paise < 0 ? '-' : '';
+  const absolute = Math.abs(paise);
+  return `${sign}${rupees.format(Math.trunc(absolute / 100))}.${String(absolute % 100).padStart(2, '0')}`;
+}
+
 export function formatDate(iso: string, withYear = true): string {
   return new Intl.DateTimeFormat('en-IN', {
     day: 'numeric',

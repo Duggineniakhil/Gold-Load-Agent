@@ -137,3 +137,18 @@ export const idempotencyKeySchema = z
   .regex(/^[\x21-\x7E]{1,255}$/, 'Use 1–255 printable characters without spaces.');
 
 export type StatusUpdateRequest = z.infer<typeof statusUpdateRequestSchema>;
+
+/** Arguments of Loan Assist's check_existing_application tool. */
+export const existingApplicationRequestSchema = z.object({ mobileNumber: mobileNumberSchema });
+
+/** An illustrative repayment for a chosen loan amount on one plan (the calculator). */
+export const repaymentEstimateRequestSchema = z.object({
+  planId: planIdSchema,
+  loanAmountRupees: z
+    .number({ error: 'Enter the loan amount in rupees.' })
+    .int('Use whole rupees.')
+    .min(1000, 'Enter at least ₹1,000.')
+    .max(10000000, 'Enter at most ₹1,00,00,000.'),
+});
+
+export type RepaymentEstimateRequest = z.infer<typeof repaymentEstimateRequestSchema>;

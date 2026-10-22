@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import express from 'express';
+import express, { type RequestHandler } from 'express';
 import { pinoHttp } from 'pino-http';
 import { z, ZodError } from 'zod';
 import {
@@ -9,6 +9,7 @@ import {
   leadRequestSchema,
   planIdSchema,
   quoteRequestSchema,
+  repaymentEstimateRequestSchema,
   statusUpdateRequestSchema,
   API_PREFIX,
 } from '@tglobal/shared';
@@ -20,13 +21,17 @@ import { listActiveLoanSchemes } from './services/loan-scheme-service.js';
 import type { GoldRateService } from './services/gold-rate-service.js';
 import {
   getLeadAudit,
+  getLeadStats,
   listLeads,
   submitLeadRequest,
   updateLeadStatus,
 } from './services/lead-service.js';
 import { createQuotes } from './services/quote-service.js';
+import { estimateLoanRepayment } from './services/repayment-service.js';
 import { AppError, NotFoundError, ValidationError } from './errors.js';
 import { logger as defaultLogger } from './logger.js';
+import { createAdminGuard } from './admin-auth.js';
+import { createRateLimiter, type RateLimitOptions } from './rate-limit.js';
 
 export type AppDependencies = {
   loanSchemeRepository: LoanSchemeRepository;
@@ -35,6 +40,10 @@ export type AppDependencies = {
   /** Absent when no LLM key is configured; the agent routes then answer 503. */
   agent?: AgentService | undefined;
   logger?: Logger;
+  /** Per-IP limits; omitted (as in most tests) means no limit. */
+  /** When set, the admin endpoints require it in the X-Admin-Passcode header. */
+  adminPasscode?: string | undefined;
+  rateLimits?: { leads?: RateLimitOptions | undefined; agent?: RateLimitOptions | undefined };
 };
 
 function parseOrThrow<T extends z.ZodType>(schema: T, value: unknown): z.infer<T> {
@@ -64,7 +73,7 @@ function requireAgent(agent: AgentService | undefined): AgentService {
     throw new AppError(
       503,
       'AGENT_NOT_CONFIGURED',
-      'Loan Assist is not configured on this server. Set LLM_API_KEY.',
+      'Loan Assist is not configured on this server. Set LLM_API_KEY or LLM_FALLBACK_API_KEY.',
     );
   }
   return agent;
@@ -72,6 +81,10 @@ function requireAgent(agent: AgentService | undefined): AgentService {
 
 export function createApp(deps: AppDependencies) {
   const app = express();
+  const noLimit: RequestHandler = (_request, _response, next) => next();
+  const limitLeads = deps.rateLimits?.leads ? createRateLimiter(deps.rateLimits.leads) : noLimit;
+  const requireAdmin = createAdminGuard(deps.adminPasscode);
+  const limitAgent = deps.rateLimits?.agent ? createRateLimiter(deps.rateLimits.agent) : noLimit;
 
   app.use(
     pinoHttp({
@@ -101,7 +114,12 @@ export function createApp(deps: AppDependencies) {
     response.json(await createQuotes(input, deps.loanSchemeRepository, ratePaisePerGram));
   });
 
-  app.post(`${API_PREFIX}/leads`, async (request, response) => {
+  app.post(`${API_PREFIX}/repayment-estimates`, async (request, response) => {
+    const input = parseOrThrow(repaymentEstimateRequestSchema, request.body);
+    response.json(await estimateLoanRepayment(input, deps.loanSchemeRepository));
+  });
+
+  app.post(`${API_PREFIX}/leads`, limitLeads, async (request, response) => {
     const input = parseOrThrow(leadRequestSchema, request.body);
     const key = request.get('Idempotency-Key');
     const idempotencyKey =
@@ -117,7 +135,12 @@ export function createApp(deps: AppDependencies) {
     response.status(201).json(body);
   });
 
-  app.get(`${API_PREFIX}/leads`, async (request, response) => {
+  app.get(`${API_PREFIX}/leads/stats`, requireAdmin, async (request, response) => {
+    const { planId } = parseOrThrow(z.object({ planId: planIdSchema.optional() }), request.query);
+    response.json(await getLeadStats(deps.leadRepository, planId));
+  });
+
+  app.get(`${API_PREFIX}/leads`, requireAdmin, async (request, response) => {
     const querySchema = z.object({
       limit: z.coerce.number().int().min(1).max(100).default(20),
       cursor: z.string().min(1).optional(),
@@ -127,15 +150,19 @@ export function createApp(deps: AppDependencies) {
     response.json(await listLeads(deps.leadRepository, query));
   });
 
-  app.patch(`${API_PREFIX}/leads/:applicationId/status`, async (request, response) => {
-    const update = parseOrThrow(statusUpdateRequestSchema, request.body);
-    response.json(
-      await updateLeadStatus(request.params.applicationId, update, deps.leadRepository),
-    );
-  });
+  app.patch(
+    `${API_PREFIX}/leads/:applicationId/status`,
+    requireAdmin,
+    async (request, response) => {
+      const update = parseOrThrow(statusUpdateRequestSchema, request.body);
+      response.json(
+        await updateLeadStatus(String(request.params.applicationId), update, deps.leadRepository),
+      );
+    },
+  );
 
-  app.get(`${API_PREFIX}/leads/:applicationId/audit`, async (request, response) => {
-    response.json(await getLeadAudit(request.params.applicationId, deps.leadRepository));
+  app.get(`${API_PREFIX}/leads/:applicationId/audit`, requireAdmin, async (request, response) => {
+    response.json(await getLeadAudit(String(request.params.applicationId), deps.leadRepository));
   });
 
   app.get(`${API_PREFIX}/gold-rate`, async (_request, response) => {
@@ -150,15 +177,21 @@ export function createApp(deps: AppDependencies) {
     });
   });
 
-  app.post(`${API_PREFIX}/agent/messages`, async (request, response) => {
+  app.post(`${API_PREFIX}/agent/messages`, limitAgent, async (request, response) => {
     const input = parseOrThrow(agentMessageRequestSchema, request.body);
     response.json(await requireAgent(deps.agent).sendMessage(input));
   });
 
-  app.post(`${API_PREFIX}/agent/sessions/:sessionId/confirm`, async (request, response) => {
-    const { confirm } = parseOrThrow(agentConfirmRequestSchema, request.body);
-    response.json(await requireAgent(deps.agent).confirm(request.params.sessionId, confirm));
-  });
+  app.post(
+    `${API_PREFIX}/agent/sessions/:sessionId/confirm`,
+    limitAgent,
+    async (request, response) => {
+      const { confirm } = parseOrThrow(agentConfirmRequestSchema, request.body);
+      response.json(
+        await requireAgent(deps.agent).confirm(String(request.params.sessionId), confirm),
+      );
+    },
+  );
 
   app.use((_request, _response, next) => next(new NotFoundError()));
 

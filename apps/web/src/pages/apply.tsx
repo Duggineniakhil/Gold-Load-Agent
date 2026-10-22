@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { api, ApiError, type Plan, type Quote, type SubmittedLead } from '../lib/api';
 import { duplicateMessage, formatDate, formatRupees } from '../lib/format';
 import { useLiveQuote, usePlans } from '../lib/hooks';
@@ -41,8 +41,21 @@ const fieldOrder: DetailsField[] = [
 ];
 const weightFields: DetailsField[] = ['grossWeightGrams', 'netWeightGrams'];
 
+/** Weights, karat and plan handed over by the calculator's "Apply with these details". */
+function prefillFrom(state: unknown): Partial<Form> {
+  if (!state || typeof state !== 'object') return {};
+  const { grossWeightGrams, netWeightGrams, karat, planId } = state as Record<string, unknown>;
+  return {
+    ...(typeof grossWeightGrams === 'string' ? { grossWeightGrams } : {}),
+    ...(typeof netWeightGrams === 'string' ? { netWeightGrams } : {}),
+    ...(karat === 18 || karat === 22 || karat === 24 ? { karat } : {}),
+    ...(typeof planId === 'string' ? { planId } : {}),
+  };
+}
+
 export function ApplyPage() {
-  const [form, setForm] = useState<Form>(emptyForm);
+  const location = useLocation();
+  const [form, setForm] = useState<Form>(() => ({ ...emptyForm, ...prefillFrom(location.state) }));
   const [step, setStep] = useState(0);
   const [touched, setTouched] = useState<Set<DetailsField>>(new Set());
   const [attempted, setAttempted] = useState(false);
@@ -360,7 +373,7 @@ export function ApplyPage() {
               {submitError && (
                 <div className="alert alert--error" role="alert">
                   <p>{submitError}</p>
-                  {isDuplicate && <Link to="/leads">View the lead register</Link>}
+                  {isDuplicate && <Link to="/admin">Open it in admin</Link>}
                 </div>
               )}
               <div className="form-actions">
@@ -562,8 +575,8 @@ function Success({
           <Button tone="outline" onClick={onStartOver}>
             New application
           </Button>
-          <ButtonLink to="/leads">
-            View lead register <Icon name="arrow" />
+          <ButtonLink to="/admin">
+            Go to admin <Icon name="arrow" />
           </ButtonLink>
         </div>
       </div>

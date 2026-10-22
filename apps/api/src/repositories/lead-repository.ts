@@ -39,6 +39,7 @@ export type LeadListOptions = {
 };
 
 export type LeadStatusInfo = Pick<Lead, 'id' | 'applicationId' | 'status' | 'createdAt'>;
+export type RecentApplication = Pick<Lead, 'applicationId' | 'status' | 'createdAt'>;
 
 export interface LeadRepository {
   findScheme(planId: string): Promise<SchemeForLead | null>;
@@ -52,6 +53,8 @@ export interface LeadRepository {
   ): Promise<T>;
   list(options: LeadListOptions): Promise<LeadWithScheme[]>;
   findStatus(applicationId: string): Promise<LeadStatusInfo | null>;
+  /** The latest application from this mobile in the last 7 days, the same window as the duplicate check. */
+  findRecentApplication(mobileNumber: string): Promise<RecentApplication | null>;
   /**
    * Moves the lead from `from` to `to` and writes the audit row in one transaction.
    * Returns null when the lead is no longer in `from` (another change won the race).
@@ -63,6 +66,10 @@ export interface LeadRepository {
     actor: string;
   }): Promise<{ lead: Lead; entry: LeadAuditLog } | null>;
   auditLog(leadId: string): Promise<LeadAuditLog[]>;
+  /** Count and total eligible loan per status, optionally for one plan. */
+  statusTotals(
+    planId?: string,
+  ): Promise<{ status: LeadStatus; count: number; eligibleLoanPaise: bigint }[]>;
 }
 
 export function createLeadRepository(prisma: PrismaClient): LeadRepository {
@@ -117,6 +124,17 @@ export function createLeadRepository(prisma: PrismaClient): LeadRepository {
       });
       return rows;
     },
+    findRecentApplication: async (mobileNumber) => {
+      const rows = await prisma.$queryRaw<RecentApplication[]>`
+        SELECT "applicationId", "status", "createdAt"
+        FROM "Lead"
+        WHERE "mobileNumber" = ${mobileNumber}
+          AND "createdAt" >= now() - interval '7 days'
+        ORDER BY "createdAt" DESC
+        LIMIT 1
+      `;
+      return rows[0] ?? null;
+    },
     findStatus: (applicationId) =>
       prisma.lead.findUnique({
         where: { applicationId },
@@ -135,6 +153,19 @@ export function createLeadRepository(prisma: PrismaClient): LeadRepository {
         });
         return { lead, entry };
       }),
+    statusTotals: async (planId) => {
+      const groups = await prisma.lead.groupBy({
+        by: ['status'],
+        ...(planId ? { where: { schemeId: planId } } : {}),
+        _count: { _all: true },
+        _sum: { eligibleLoanPaise: true },
+      });
+      return groups.map((group) => ({
+        status: group.status,
+        count: group._count._all,
+        eligibleLoanPaise: group._sum.eligibleLoanPaise ?? 0n,
+      }));
+    },
     auditLog: (leadId) =>
       prisma.leadAuditLog.findMany({ where: { leadId }, orderBy: { at: 'asc' } }),
   };

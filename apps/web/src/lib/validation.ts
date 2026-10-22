@@ -41,8 +41,22 @@ const fieldSchemas: Record<DetailsField, FieldSchema> = {
 
 /** Validates the details step with the same shared Zod schemas the API uses. */
 export function validateDetails(form: DetailsForm): DetailsErrors {
+  return validateFields(form, Object.keys(fieldSchemas) as DetailsField[]);
+}
+
+export type WeightsForm = Pick<DetailsForm, 'grossWeightGrams' | 'netWeightGrams' | 'karat'>;
+
+/** The weight and karat rules only, for the calculator. */
+export function validateWeights(form: WeightsForm): DetailsErrors {
+  return validateFields(form, ['grossWeightGrams', 'netWeightGrams', 'karat']);
+}
+
+function validateFields(
+  form: Partial<DetailsForm> & WeightsForm,
+  fields: DetailsField[],
+): DetailsErrors {
   const errors: DetailsErrors = {};
-  for (const field of Object.keys(fieldSchemas) as DetailsField[]) {
+  for (const field of fields) {
     const value = form[field];
     if (typeof value === 'string' && value.trim() === '' && field !== 'karat') {
       errors[field] = required[field];
@@ -61,7 +75,7 @@ export function validateDetails(form: DetailsForm): DetailsErrors {
   return errors;
 }
 
-function quoteFields(form: DetailsForm) {
+function quoteFields(form: WeightsForm) {
   return {
     netWeightGrams: form.netWeightGrams.trim(),
     grossWeightGrams: form.grossWeightGrams.trim(),
@@ -70,7 +84,7 @@ function quoteFields(form: DetailsForm) {
 }
 
 /** The quote request for the current weights, or null while they are incomplete or invalid. */
-export function quoteInputFrom(form: DetailsForm): QuoteRequest | null {
+export function quoteInputFrom(form: WeightsForm): QuoteRequest | null {
   const parsed = quoteRequestSchema.safeParse(quoteFields(form));
   return parsed.success ? parsed.data : null;
 }

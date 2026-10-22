@@ -7,7 +7,7 @@ import {
   mockGoldRateSource,
   type GoldRateSource,
 } from '../src/services/gold-rate-service.js';
-import { seededSchemes } from './helpers/fixtures.js';
+import { fakeLeadRepository, seededSchemes } from './helpers/fixtures.js';
 
 function countingSource(ratePaisePerGram = 700000n) {
   const calls = { count: 0 };
@@ -62,16 +62,7 @@ describe('GET /api/v1/gold-rate', () => {
   it('returns the mock 24K rate with its cache window, without BigInt in the JSON', async () => {
     const app = createApp({
       loanSchemeRepository: { findActive: async () => seededSchemes },
-      leadRepository: {
-        findScheme: async () => null,
-        withLocks: async () => {
-          throw new Error('unused');
-        },
-        list: async () => [],
-        findStatus: async () => null,
-        transitionStatus: async () => null,
-        auditLog: async () => [],
-      },
+      leadRepository: fakeLeadRepository(),
       goldRate: createGoldRateService({ source: mockGoldRateSource(700000n) }),
       logger: pino({ enabled: false }),
     });

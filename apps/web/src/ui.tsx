@@ -148,6 +148,56 @@ export function Field({ label, hint, error, suffix, id, className = '', ...props
   );
 }
 
+type SegmentedProps<T extends string | number> = {
+  legend: string;
+  name: string;
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  error?: string | undefined;
+};
+
+/** A row of radio buttons styled as one control (karat, plan). */
+export function SegmentedControl<T extends string | number>({
+  legend,
+  name,
+  options,
+  value,
+  onChange,
+  error,
+}: SegmentedProps<T>) {
+  const errorId = `${name}-error`;
+  return (
+    <fieldset className="segmented" aria-describedby={error ? errorId : undefined}>
+      <legend className="field__label">{legend}</legend>
+      <div className="segmented__options">
+        {options.map((option) => (
+          <label
+            className={`segmented__option ${value === option.value ? 'is-selected' : ''}`}
+            key={option.value}
+          >
+            <input
+              type="radio"
+              name={name}
+              value={option.value}
+              checked={value === option.value}
+              onChange={() => onChange(option.value)}
+            />
+            <span>{option.label}</span>
+          </label>
+        ))}
+      </div>
+      {error && (
+        <p className="field__error" id={errorId}>
+          {error}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
+const karatOptions = [18, 22, 24].map((karat) => ({ value: karat, label: `${karat}K` }));
+
 export function KaratSegmented({
   value,
   onChange,
@@ -158,28 +208,14 @@ export function KaratSegmented({
   error?: string | undefined;
 }) {
   return (
-    <fieldset className="karat" aria-describedby={error ? 'karat-error' : undefined}>
-      <legend className="field__label">Karat</legend>
-      <div className="karat__options">
-        {[18, 22, 24].map((karat) => (
-          <label className={`karat__option ${value === karat ? 'is-selected' : ''}`} key={karat}>
-            <input
-              type="radio"
-              name="karat"
-              value={karat}
-              checked={value === karat}
-              onChange={() => onChange(karat)}
-            />
-            <span>{karat}K</span>
-          </label>
-        ))}
-      </div>
-      {error && (
-        <p className="field__error" id="karat-error">
-          {error}
-        </p>
-      )}
-    </fieldset>
+    <SegmentedControl
+      legend="Karat"
+      name="karat"
+      options={karatOptions}
+      value={value}
+      onChange={onChange}
+      error={error}
+    />
   );
 }
 

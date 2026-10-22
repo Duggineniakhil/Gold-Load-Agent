@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { createOpenAiCompatibleClient } from './agent/llm-client.js';
+import { createLlmFromEnv } from './agent/llm-from-env.js';
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './logger.js';
@@ -15,23 +15,25 @@ const goldRate = createGoldRateService({
   source: mockGoldRateSource(env.GOLD_RATE_24K_PAISE_PER_GRAM),
 });
 
-const agent = env.LLM_API_KEY
-  ? createAgentService({
-      llm: createOpenAiCompatibleClient({
-        baseUrl: env.LLM_BASE_URL,
-        apiKey: env.LLM_API_KEY,
-        model: env.LLM_MODEL,
-        timeoutMs: env.LLM_TIMEOUT_MS,
-      }),
-      loanSchemeRepository,
-      leadRepository,
-      goldRate,
-      logger,
-    })
+const llm = createLlmFromEnv(env, logger);
+const agent = llm
+  ? createAgentService({ llm, loanSchemeRepository, leadRepository, goldRate, logger })
   : undefined;
-if (!agent) logger.warn('LLM_API_KEY is not set; Loan Assist is disabled.');
+if (!agent) logger.warn('No LLM API key is set; Loan Assist is disabled.');
+if (!env.ADMIN_PASSCODE) logger.warn('ADMIN_PASSCODE is not set; the admin endpoints are open.');
 
-const app = createApp({ loanSchemeRepository, leadRepository, goldRate, agent });
+const perMinute = (max: number) => (max > 0 ? { max, windowMs: 60_000 } : undefined);
+const app = createApp({
+  loanSchemeRepository,
+  leadRepository,
+  goldRate,
+  agent,
+  adminPasscode: env.ADMIN_PASSCODE,
+  rateLimits: {
+    leads: perMinute(env.RATE_LIMIT_LEADS_PER_MINUTE),
+    agent: perMinute(env.RATE_LIMIT_AGENT_PER_MINUTE),
+  },
+});
 
 const server = app.listen(env.API_PORT, () => {
   logger.info({ port: env.API_PORT }, 'API server listening');

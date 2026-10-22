@@ -3,6 +3,7 @@ import {
   type LeadRequest,
   type LeadStatus,
   type QuoteRequest,
+  type RepaymentEstimateRequest,
   type StatusUpdateRequest,
 } from '@tglobal/shared';
 
@@ -71,7 +72,46 @@ export type StatusChange = {
   entry: AuditEntry;
 };
 
+export type GoldRate = {
+  ratePerGram24k: number;
+  asOf: string;
+  cachedUntil: string;
+  source: string;
+};
+
+export type RepaymentEstimate = {
+  planId: string;
+  planName: string;
+  repaymentType: 'EMI' | 'BULLET';
+  annualInterestRate: number;
+  tenureMonths: number;
+  principalPaise: number;
+  monthlyInstalmentPaise: number | null;
+  totalInterestPaise: number;
+  totalPayablePaise: number;
+};
+
+export type LeadStats = {
+  total: number;
+  byStatus: Record<LeadStatus, number>;
+  totalEligibleLoanPaise: number;
+};
+
 export type FieldError = { field: string; message: string };
+
+const passcodeKey = 'tglobal.adminPasscode';
+
+/** The admin passcode for this browser tab, sent as X-Admin-Passcode on admin calls only. */
+export const adminSession = {
+  get: () => sessionStorage.getItem(passcodeKey),
+  set: (passcode: string) => sessionStorage.setItem(passcodeKey, passcode),
+  clear: () => sessionStorage.removeItem(passcodeKey),
+};
+
+const adminHeaders = (): Record<string, string> => {
+  const passcode = adminSession.get();
+  return passcode ? { 'X-Admin-Passcode': passcode } : {};
+};
 
 /** An API error in the shared contract: { error: { code, message, fields } }. */
 export class ApiError extends Error {
@@ -132,17 +172,26 @@ export const api = {
       '/leads',
       postJson(input, undefined, { 'Idempotency-Key': idempotencyKey }),
     ),
+  goldRate: () => request<GoldRate>('/gold-rate'),
+  repaymentEstimate: (input: RepaymentEstimateRequest, signal?: AbortSignal) =>
+    request<RepaymentEstimate>('/repayment-estimates', postJson(input, signal)),
+  leadStats: (planId: string) =>
+    request<LeadStats>(`/leads/stats${planId ? `?planId=${encodeURIComponent(planId)}` : ''}`, {
+      headers: adminHeaders(),
+    }),
   updateStatus: (applicationId: string, change: StatusUpdateRequest) =>
     request<StatusChange>(`/leads/${encodeURIComponent(applicationId)}/status`, {
-      ...postJson(change),
+      ...postJson(change, undefined, adminHeaders()),
       method: 'PATCH',
     }),
   audit: (applicationId: string) =>
-    request<LeadAudit>(`/leads/${encodeURIComponent(applicationId)}/audit`),
+    request<LeadAudit>(`/leads/${encodeURIComponent(applicationId)}/audit`, {
+      headers: adminHeaders(),
+    }),
   leads: ({ planId, cursor }: { planId: string; cursor?: string | null }) => {
     const query = new URLSearchParams({ limit: String(LEADS_PAGE_SIZE) });
     if (planId) query.set('planId', planId);
     if (cursor) query.set('cursor', cursor);
-    return request<LeadPage>(`/leads?${query}`);
+    return request<LeadPage>(`/leads?${query}`, { headers: adminHeaders() });
   },
 };

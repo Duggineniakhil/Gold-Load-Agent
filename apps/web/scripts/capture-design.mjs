@@ -82,8 +82,8 @@ function leadsPage(url, rows) {
   return { items, nextCursor: start + limit < filtered.length ? items.at(-1).applicationId : null };
 }
 
-async function mockApi(page, { duplicate = false, leadsMode = 'paged' } = {}) {
-  const control = { failLeads: leadsMode === 'error' };
+async function mockApi(page, { duplicate = false, leadsMode = 'paged', adminPasscode = '' } = {}) {
+  const control = { failLeads: leadsMode === 'error', repaymentAmounts: [] };
   // Each page gets its own copy so status changes do not leak between runs.
   const rows = leads.map((lead) => ({ ...lead }));
   const history = new Map();
@@ -95,8 +95,67 @@ async function mockApi(page, { duplicate = false, leadsMode = 'paged' } = {}) {
   };
   await page.route('**/api/v1/loan-schemes', (route) => route.fulfill({ json: plans }));
   await page.route('**/api/v1/quotes', (route) => route.fulfill({ json: quote }));
+  await page.route('**/api/v1/gold-rate', (route) =>
+    route.fulfill({
+      json: {
+        ratePerGram24k: 7000,
+        source: 'mock',
+        asOf: '2026-10-22T09:00:00.000Z',
+        cachedUntil: '2026-10-22T09:01:00.000Z',
+      },
+    }),
+  );
+  await page.route('**/api/v1/repayment-estimates', (route) => {
+    const { planId, loanAmountRupees } = route.request().postDataJSON();
+    control.repaymentAmounts.push(loanAmountRupees);
+    const principalPaise = loanAmountRupees * 100;
+    const emi = planId === 'PLAN_EMI_01';
+    const totalInterestPaise = Math.round(principalPaise * (emi ? 0.0577832 : 0.12));
+    return route.fulfill({
+      json: {
+        planId,
+        planName: emi ? 'Monthly EMI' : 'Bullet Repayment',
+        repaymentType: emi ? 'EMI' : 'BULLET',
+        annualInterestRate: emi ? 10.5 : 12,
+        tenureMonths: 12,
+        principalPaise,
+        monthlyInstalmentPaise: emi ? Math.round((principalPaise + totalInterestPaise) / 12) : null,
+        totalInterestPaise,
+        totalPayablePaise: principalPaise + totalInterestPaise,
+      },
+    });
+  });
   await page.route('**/api/v1/leads**', (route) => {
     const path = new URL(route.request().url()).pathname;
+    const isAdminCall = route.request().method() !== 'POST';
+    if (
+      adminPasscode &&
+      isAdminCall &&
+      route.request().headers()['x-admin-passcode'] !== adminPasscode
+    ) {
+      return route.fulfill({
+        status: 401,
+        json: {
+          error: { code: 'ADMIN_AUTH_REQUIRED', message: 'Enter the admin passcode.', fields: [] },
+        },
+      });
+    }
+    if (path.endsWith('/stats')) {
+      const total = rows.length;
+      const count = (status) => rows.filter((row) => row.status === status).length;
+      return route.fulfill({
+        json: {
+          total,
+          byStatus: {
+            SUBMITTED: count('SUBMITTED'),
+            UNDER_REVIEW: count('UNDER_REVIEW'),
+            APPROVED: count('APPROVED'),
+            REJECTED: count('REJECTED'),
+          },
+          totalEligibleLoanPaise: rows.reduce((sum, row) => sum + row.eligibleLoanPaise, 0),
+        },
+      });
+    }
     const applicationId = path.split('/')[4];
     const lead = rows.find((row) => row.applicationId === applicationId);
     if (path.endsWith('/audit')) {
@@ -212,7 +271,7 @@ async function walkLeads(browser, viewport) {
   };
 
   const { page } = await open();
-  await page.goto(`${base}/leads`, { waitUntil: 'networkidle' });
+  await page.goto(`${base}/admin`, { waitUntil: 'networkidle' });
   await page.getByText('GL-1025').waitFor();
   const table = page.getByRole('table', { name: 'Gold loan applications, newest first' });
   if ((await table.locator('tbody tr').count()) !== 20)
@@ -240,7 +299,7 @@ async function walkLeads(browser, viewport) {
   if (await page.getByRole('button', { name: 'Load more' }).count())
     throw new Error('Load more should disappear on the last page');
 
-  await page.getByLabel('Plan').selectOption('PLAN_BULLET_01');
+  await page.getByLabel('Plan', { exact: true }).selectOption('PLAN_BULLET_01');
   await page.waitForURL(/\?planId=PLAN_BULLET_01$/);
   await page
     .getByRole('table', {
@@ -251,18 +310,19 @@ async function walkLeads(browser, viewport) {
   await capture(page, 'leads-filtered', viewport);
 
   await page.reload({ waitUntil: 'networkidle' });
-  if ((await page.getByLabel('Plan').inputValue()) !== 'PLAN_BULLET_01')
+  if ((await page.getByLabel('Plan', { exact: true }).inputValue()) !== 'PLAN_BULLET_01')
     throw new Error('plan filter should survive a reload');
   await page.close();
 
   const { page: empty } = await open({ leadsMode: 'empty' });
-  await empty.goto(`${base}/leads`, { waitUntil: 'networkidle' });
+  await empty.goto(`${base}/admin`, { waitUntil: 'networkidle' });
   await empty.getByRole('link', { name: /Start an application/ }).waitFor();
   await capture(empty, 'leads-empty', viewport);
   await empty.close();
 
   const { page: failing, control } = await open({ leadsMode: 'error' });
   await failing.goto(`${base}/leads`, { waitUntil: 'networkidle' });
+  await failing.waitForURL(/\/admin$/);
   await failing.getByRole('button', { name: 'Try again' }).waitFor();
   await capture(failing, 'leads-error', viewport);
   control.failLeads = false;
@@ -271,7 +331,7 @@ async function walkLeads(browser, viewport) {
   await failing.close();
 
   const { page: admin } = await open();
-  await admin.goto(`${base}/leads`, { waitUntil: 'networkidle' });
+  await admin.goto(`${base}/admin`, { waitUntil: 'networkidle' });
   await admin.getByRole('button', { name: 'GL-1025: view status and history' }).click();
   const drawer = admin.getByRole('dialog', { name: 'GL-1025' });
   await drawer.locator('.timeline').getByText('Submitted', { exact: true }).waitFor();
@@ -294,6 +354,70 @@ async function walkLeads(browser, viewport) {
   await admin.close();
 }
 
+async function walkCalculator(browser, viewport) {
+  const page = await browser.newPage({
+    viewport: { width: viewport.width, height: viewport.height },
+    deviceScaleFactor: 1,
+  });
+  const control = await mockApi(page);
+  await page.goto(`${base}/calculator`, { waitUntil: 'networkidle' });
+  await page.getByText('Enter the gross and net weight to see your eligible loan.').waitFor();
+  await page.getByText('₹7,000/g').waitFor();
+  await page.getByLabel('Gross weight').fill('50');
+  await page.getByLabel('Net gold weight').fill('52');
+  await page.getByText('Net weight cannot exceed gross weight.').waitFor();
+  await page.getByLabel('Net gold weight').fill('45');
+  await page.getByText('Monthly EMI', { exact: true }).first().click();
+  await page.getByText('Eligible loan · Monthly EMI').waitFor();
+  await page.getByText('Monthly EMI', { exact: true }).last().waitFor();
+  await page.locator('.calculator__breakdown').waitFor();
+  if (!control.repaymentAmounts.includes(216562))
+    throw new Error('repayment should be requested for the full eligible loan');
+  await capture(page, 'calculator', viewport);
+
+  const slider = page.getByLabel('Loan amount');
+  await slider.focus();
+  await page.keyboard.press('Home');
+  await page.waitForTimeout(600);
+  if (!control.repaymentAmounts.some((amount) => amount < 2000))
+    throw new Error('moving the slider should re-estimate');
+
+  await page.getByRole('button', { name: /Apply with these details/ }).click();
+  await page.waitForURL(/\/apply$/);
+  if ((await page.getByLabel('Gross weight').inputValue()) !== '50')
+    throw new Error('Apply should be pre-filled from the calculator');
+  if ((await page.getByLabel('Net gold weight').inputValue()) !== '45')
+    throw new Error('net weight should be pre-filled');
+  await page.close();
+}
+
+async function walkAdminGate(browser, viewport) {
+  const page = await browser.newPage({
+    viewport: { width: viewport.width, height: viewport.height },
+    deviceScaleFactor: 1,
+  });
+  await mockApi(page, { adminPasscode: 'letmein' });
+  await page.goto(`${base}/admin`, { waitUntil: 'networkidle' });
+  await page.getByRole('heading', { name: 'Admin access' }).waitFor();
+  await page.getByLabel('Passcode').fill('wrong');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByText('That passcode is not correct.').waitFor();
+  await capture(page, 'admin-gate', viewport);
+  await page.getByLabel('Passcode').fill('letmein');
+  await page.getByRole('button', { name: 'Unlock' }).click();
+  await page.getByRole('table').waitFor();
+  const applications = page
+    .locator('.admin__stat')
+    .filter({ hasText: 'Applications' })
+    .locator('strong');
+  if ((await applications.innerText()).trim() !== '25')
+    throw new Error('stats should count every lead');
+  await capture(page, 'admin', viewport);
+  await page.getByRole('button', { name: /Lock/ }).click();
+  await page.getByRole('heading', { name: 'Admin access' }).waitFor();
+  await page.close();
+}
+
 const browser = await chromium.launch({ headless: true });
 for (const viewport of [
   { name: '375', width: 375, height: 812 },
@@ -301,6 +425,8 @@ for (const viewport of [
   { name: '1440', width: 1440, height: 1000 },
 ]) {
   await walkLeads(browser, viewport);
+  await walkCalculator(browser, viewport);
+  await walkAdminGate(browser, viewport);
 }
 
 for (const viewport of [

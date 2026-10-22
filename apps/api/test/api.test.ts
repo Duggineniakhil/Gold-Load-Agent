@@ -2,7 +2,7 @@ import pino from 'pino';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
-import { fixedGoldRate } from './helpers/fixtures.js';
+import { fakeLeadRepository, fixedGoldRate } from './helpers/fixtures.js';
 import type { LoanSchemeRecord } from '../src/repositories/loan-scheme-repository.js';
 
 const seededSchemes: LoanSchemeRecord[] = [
@@ -27,16 +27,7 @@ const seededSchemes: LoanSchemeRecord[] = [
 function makeApp(findActive = async () => seededSchemes) {
   return createApp({
     loanSchemeRepository: { findActive },
-    leadRepository: {
-      findScheme: async () => null,
-      withLocks: async () => {
-        throw new Error('No lead repository configured for this test.');
-      },
-      list: async () => [],
-      findStatus: async () => null,
-      transitionStatus: async () => null,
-      auditLog: async () => [],
-    },
+    leadRepository: fakeLeadRepository(),
     goldRate: fixedGoldRate(),
     logger: pino({ enabled: false }),
   });
@@ -166,5 +157,50 @@ describe('API foundation', () => {
     });
     expect(JSON.stringify(response.body)).not.toContain('stack');
     expect(JSON.stringify(response.body)).not.toContain('database internals');
+  });
+
+  it('estimates EMI repayment from the plan rate and tenure in exact paise', async () => {
+    const response = await request(makeApp())
+      .post('/api/v1/repayment-estimates')
+      .send({ planId: 'PLAN_EMI_01', loanAmountRupees: 100000 })
+      .expect(200);
+    expect(response.body).toEqual({
+      planId: 'PLAN_EMI_01',
+      planName: 'Monthly EMI',
+      repaymentType: 'EMI',
+      annualInterestRate: 10.5,
+      tenureMonths: 12,
+      principalPaise: 10000000,
+      monthlyInstalmentPaise: 881486,
+      totalInterestPaise: 577832,
+      totalPayablePaise: 10577832,
+    });
+  });
+
+  it('estimates bullet repayment as simple interest at maturity', async () => {
+    const response = await request(makeApp())
+      .post('/api/v1/repayment-estimates')
+      .send({ planId: 'PLAN_BULLET_01', loanAmountRupees: 202125 })
+      .expect(200);
+    expect(response.body).toMatchObject({
+      monthlyInstalmentPaise: null,
+      totalInterestPaise: 2425500,
+      totalPayablePaise: 22638000,
+    });
+  });
+
+  it('rejects unknown plans and fractional rupees', async () => {
+    const missing = await request(makeApp())
+      .post('/api/v1/repayment-estimates')
+      .send({ planId: 'PLAN_X', loanAmountRupees: 100000 })
+      .expect(404);
+    expect(missing.body.error.code).toBe('PLAN_NOT_FOUND');
+    const fractional = await request(makeApp())
+      .post('/api/v1/repayment-estimates')
+      .send({ planId: 'PLAN_EMI_01', loanAmountRupees: 1000.5 })
+      .expect(400);
+    expect(fractional.body.error.fields).toEqual([
+      { field: 'loanAmountRupees', message: 'Use whole rupees.' },
+    ]);
   });
 });

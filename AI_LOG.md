@@ -6,7 +6,7 @@
 | --- | --- |
 | **OpenAI Codex** | The first commits: monorepo scaffold (`ebd7cdb`), Prisma schema and migrations (`dad1e91`), exact money maths in integer paise (`7236199`), API foundation and quote endpoints (`15da5b0`), lead submission and listing (`2bacfbe`), and the first design system (`e1096b1`). |
 | **Claude Code** (Claude Opus 5.5) | Everything from `3ab71b1` on: fixing the failing tests and type errors, the Loan Assist agent and its evals (`8ad4d71`), the redesign and 3-step application (`68dd568`), the lead register (`2f71ca0`) and the B1 hardening (`d5dc2ce`). I worked plan first: Claude Code proposed files, approach and risks; I approved or changed the plan; then it implemented, ran typecheck, lint, tests and Playwright, and I reviewed the diffs before each commit. |
-| **Gemini 3.5 Flash Lite** (free tier, via Gemini's OpenAI-compatible endpoint) | Not a coding tool: the model that runs inside Loan Assist. It only ever sees the three tools; all maths happens in the API. |
+| **Gemini 3.5 Flash Lite**, with **Groq `openai/gpt-oss-20b`** as fallback (free tiers, OpenAI-compatible endpoints) | Not coding tools: the models that run inside Loan Assist. They only ever see the four tools; all maths happens in the API. |
 
 ## Prompt 1: validation (exact)
 

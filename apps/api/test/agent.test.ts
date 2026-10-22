@@ -172,6 +172,42 @@ describe('Loan Assist agent', () => {
     expect(turn.reply).toMatch(/gross weight/);
   });
 
+  it('checks for an existing application with a mobile number the borrower typed', async () => {
+    const { agent, app } = setup([
+      callTool('check_existing_application', { mobileNumber: '9876500011' }),
+      (messages) => {
+        const result = lastToolResult(messages);
+        expect(result).toMatchObject({
+          hasRecentApplication: true,
+          applicationId: 'GL-1001',
+          status: 'SUBMITTED',
+        });
+        expect(JSON.stringify(result)).not.toMatch(/[6-9]\d{9}/);
+        return say(`You already applied: ${result.applicationId} on ${result.appliedOn}.`)(
+          messages,
+        );
+      },
+      callTool('check_existing_application', { mobileNumber: '9123456789' }, 'call_2'),
+      (messages) => {
+        expect(lastToolResult(messages).error.code).toBe('NOT_PROVIDED_BY_BORROWER');
+        return say('Which mobile number did you apply with?')(messages);
+      },
+    ]);
+    await request(app).post('/api/v1/leads').send(application).expect(201);
+
+    const found = await agent.sendMessage({
+      message: 'Did I already apply? My mobile is 98765 00011.',
+    });
+    expect(found.toolEvents).toEqual([{ tool: 'check_existing_application', ok: true }]);
+    expect(found.reply).toContain('GL-1001');
+
+    const probing = await agent.sendMessage({
+      sessionId: found.sessionId,
+      message: 'Check my friend too.',
+    });
+    expect(probing.toolEvents).toEqual([{ tool: 'check_existing_application', ok: false }]);
+  });
+
   it('files nothing until the borrower confirms, then stores the same lead as the form path', async () => {
     const { app } = setup([callTool('submit_application', application)]);
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { QuoteRequest } from '@tglobal/shared';
-import { api, ApiError, type Plan, type Quote } from './api';
+import { api, ApiError, type GoldRate, type Plan, type Quote, type RepaymentEstimate } from './api';
 
 export function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -77,4 +77,58 @@ export function useLiveQuote(input: QuoteRequest | null, delayMs = 300) {
   // While the latest input has not been quoted yet, the shown quote is out of date.
   const pending = key !== debouncedKey || loading;
   return { quote: key ? quote : null, pending: Boolean(key) && pending, error: key ? error : null };
+}
+
+/** Server-computed repayment for a plan and loan amount, re-requested ~300 ms after the amount settles. */
+export function useRepaymentEstimate(planId: string, loanAmountRupees: number | null) {
+  const key = planId && loanAmountRupees ? `${planId}:${loanAmountRupees}` : '';
+  const debouncedKey = useDebouncedValue(key, 300);
+  const [estimate, setEstimate] = useState<RepaymentEstimate | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!debouncedKey) {
+      setEstimate(null);
+      return;
+    }
+    const [plan = '', amount = '0'] = debouncedKey.split(':');
+    const controller = new AbortController();
+    api
+      .repaymentEstimate({ planId: plan, loanAmountRupees: Number(amount) }, controller.signal)
+      .then((data) => {
+        setEstimate(data);
+        setError('');
+      })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        setEstimate(null);
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : 'The repayment estimate could not be prepared.',
+        );
+      });
+    return () => controller.abort();
+  }, [debouncedKey]);
+
+  return {
+    estimate: key ? estimate : null,
+    pending: key !== debouncedKey,
+    error: key ? error : '',
+  };
+}
+
+export function useGoldRate() {
+  const [rate, setRate] = useState<GoldRate | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .goldRate()
+      .then((data) => alive && setRate(data))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return rate;
 }

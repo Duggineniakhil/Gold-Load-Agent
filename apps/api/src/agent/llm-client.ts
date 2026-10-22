@@ -51,6 +51,12 @@ type ClientOptions = {
   timeoutMs: number;
   maxRetries?: number;
   retryDelayMs?: number;
+  /**
+   * Send and keep only standard OpenAI message fields. For providers other than Gemini:
+   * Gemini's thought signatures are dropped on the way out, and fields such as Groq's
+   * `reasoning` never enter the conversation history.
+   */
+  standardMessages?: boolean;
   fetch?: typeof fetch;
 };
 
@@ -74,7 +80,12 @@ export function createOpenAiCompatibleClient(options: ClientOptions): LlmClient 
               authorization: `Bearer ${options.apiKey}`,
               'content-type': 'application/json',
             },
-            body: JSON.stringify({ model: options.model, messages, tools, temperature: 0 }),
+            body: JSON.stringify({
+              model: options.model,
+              messages: options.standardMessages ? messages.map(toStandardMessage) : messages,
+              tools,
+              temperature: 0,
+            }),
             signal: AbortSignal.timeout(options.timeoutMs),
           });
         } catch (error) {
@@ -86,7 +97,12 @@ export function createOpenAiCompatibleClient(options: ClientOptions): LlmClient 
         }
 
         if (retryableStatus.has(response.status) && attempt < maxRetries) {
-          await delay(retryDelayMs * 2 ** attempt);
+          // Honour the provider's Retry-After (seconds) when it asks for longer than our backoff.
+          const retryAfterMs = Number(response.headers.get('retry-after')) * 1000;
+          const backoffMs = retryDelayMs * 2 ** attempt;
+          await delay(
+            Math.min(Math.max(backoffMs, Number.isFinite(retryAfterMs) ? retryAfterMs : 0), 20_000),
+          );
           continue;
         }
         if (!response.ok) {
@@ -98,6 +114,7 @@ export function createOpenAiCompatibleClient(options: ClientOptions): LlmClient 
         const body = (await response.json()) as { choices?: { message?: AssistantMessage }[] };
         const message = body.choices?.[0]?.message;
         if (!message) throw new LlmUnavailableError('Response contained no message');
+        if (options.standardMessages) return toStandardMessage(message) as AssistantMessage;
         return {
           ...message,
           role: 'assistant',
@@ -112,6 +129,49 @@ export function createOpenAiCompatibleClient(options: ClientOptions): LlmClient 
             : {}),
         };
       }
+    },
+  };
+}
+
+function toStandardMessage(message: ChatMessage): ChatMessage {
+  if (message.role !== 'assistant') return message;
+  return {
+    role: 'assistant',
+    content: message.content ?? null,
+    ...(message.tool_calls?.length
+      ? {
+          tool_calls: message.tool_calls.map((call) => ({
+            id: call.id || randomUUID(),
+            type: 'function' as const,
+            function: { name: call.function.name, arguments: call.function.arguments },
+          })),
+        }
+      : {}),
+  };
+}
+
+/**
+ * Tries each provider in order and moves on only when one is unavailable (after its own
+ * retries). Each turn's history is plain chat messages, so providers can take over mid-conversation.
+ */
+export function createFallbackClient(
+  providers: { name: string; client: LlmClient }[],
+  onFallback?: (event: { from: string; to: string; detail: string }) => void,
+): LlmClient {
+  return {
+    async complete(request) {
+      let lastError: LlmUnavailableError | undefined;
+      for (const [index, provider] of providers.entries()) {
+        try {
+          return await provider.client.complete(request);
+        } catch (error) {
+          if (!(error instanceof LlmUnavailableError)) throw error;
+          lastError = error;
+          const next = providers[index + 1];
+          if (next) onFallback?.({ from: provider.name, to: next.name, detail: error.detail });
+        }
+      }
+      throw lastError ?? new LlmUnavailableError('No LLM provider is configured');
     },
   };
 }

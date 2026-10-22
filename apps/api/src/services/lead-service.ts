@@ -1,6 +1,7 @@
 import type { LeadAuditLog, LeadStatus } from '@prisma/client';
 import {
   canTransition,
+  leadStatuses,
   leadStatusTransitions,
   type LeadRequest,
   type StatusUpdateRequest,
@@ -234,5 +235,24 @@ export async function listLeads(
       createdAt: lead.createdAt,
     })),
     nextCursor: rows.length > options.limit ? (page.at(-1)?.id ?? null) : null,
+  };
+}
+
+/** Totals for the admin dashboard, computed in the database over every lead (not one page). */
+export async function getLeadStats(repository: LeadRepository, planId?: string) {
+  const groups = await repository.statusTotals(planId);
+  const byStatus = Object.fromEntries(leadStatuses.map((status) => [status, 0])) as Record<
+    LeadStatus,
+    number
+  >;
+  let totalEligibleLoanPaise = 0n;
+  for (const group of groups) {
+    byStatus[group.status] = group.count;
+    totalEligibleLoanPaise += group.eligibleLoanPaise;
+  }
+  return {
+    total: groups.reduce((sum, group) => sum + group.count, 0),
+    byStatus,
+    totalEligibleLoanPaise: Number(totalEligibleLoanPaise),
   };
 }

@@ -1,8 +1,8 @@
 # TGlobal Gold Loan Portal
 
-A gold-loan intake portal for field agents and borrowers. Enter the gold's weight and karat to get a preliminary offer for every plan, then apply through a 3-step form or by chatting with **Loan Assist**, an AI agent that quotes and files applications by calling the backend's tools. Both paths use the same validated service layer and produce identical numbers. An admin register lists every application, with a status workflow and an audit trail.
+A gold-loan intake portal for field agents and borrowers. Enter the gold's weight and karat to get a preliminary offer for every plan, then apply through a 3-step form or by chatting with **Loan Assist**, an AI agent that quotes and files applications by calling the backend's tools. Both paths use the same validated service layer and produce identical numbers. A public calculator estimates the loan and its repayment, and a passcode-protected admin page shows totals and every application, with a status workflow and an audit trail.
 
-AI tools, exact prompts and the AI mistakes that were caught are in [AI_LOG.md](AI_LOG.md).
+How it fits together is in [ARCHITECTURE.md](ARCHITECTURE.md). AI tools, exact prompts and the AI mistakes that were caught are in [AI_LOG.md](AI_LOG.md).
 
 ## Tech choices and why
 
@@ -16,7 +16,7 @@ AI tools, exact prompts and the AI mistakes that were caught are in [AI_LOG.md](
 | PostgreSQL advisory locks | The 7-day duplicate check and the idempotency check hold under concurrent requests without a uniqueness trick. |
 | React + Vite + `motion` | A fast single-page app. The UI calls the API for every figure and never computes money itself. |
 | Vitest + Supertest + Playwright | Unit, API and database tests in one runner, plus a Playwright walkthrough at 375, 768 and 1440 px. |
-| Gemini via its OpenAI-compatible API, using plain `fetch` | A free tier with tool calling, and no SDK lock-in: any OpenAI-compatible provider works by changing three env vars. |
+| Gemini, with Groq as a fallback, via OpenAI-compatible APIs and plain `fetch` | Free tiers with tool calling. If Gemini is busy, Groq answers instead, and there is no SDK lock-in: any OpenAI-compatible provider works by changing env vars. |
 
 ## Prerequisites
 
@@ -41,6 +41,8 @@ npm run dev
 
 Open <http://localhost:5173>. The API runs on <http://localhost:3001>, and Vite proxies `/api` to it. `npm install` also generates the Prisma client.
 
+The pages are `/` (home), `/apply` (3-step application), `/calculator` (loan and repayment estimate) and `/admin` (totals, the lead register and status changes; `/leads` redirects there).
+
 - Put your key in `LLM_API_KEY` in `.env` to enable Loan Assist. Without it, the rest of the app works and the agent endpoints return `503 AGENT_NOT_CONFIGURED`.
 - **Port 5432 already in use** (for example by a local PostgreSQL)? Set `POSTGRES_PORT=5433` in `.env` and change the port in `DATABASE_URL` and `TEST_DATABASE_URL` to match.
 - The test database `tglobal_test` is created by `docker/postgres-init` the first time the volume starts. If you had an older volume, recreate it with `docker compose down -v`.
@@ -57,7 +59,13 @@ Open <http://localhost:5173>. The API runs on <http://localhost:3001>, and Vite 
 | `LLM_API_KEY` | empty | LLM provider key. Empty disables Loan Assist and skips the evals. |
 | `LLM_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai/` | Any OpenAI-compatible base URL, ending in `/`. |
 | `LLM_MODEL` | `gemini-3.5-flash-lite` | Model used by Loan Assist. |
-| `LLM_TIMEOUT_MS` | `30000` | Per-request timeout. 408, 429, 500, 502, 503 and 504 responses are retried 3 times with backoff. |
+| `LLM_TIMEOUT_MS` | `30000` | Per-request timeout. 408, 429, 500, 502, 503 and 504 responses are retried 3 times with backoff (once when a fallback is set). |
+| `LLM_FALLBACK_API_KEY` | empty | Optional fallback provider key, used only when the primary is unavailable. On its own, it also enables Loan Assist. |
+| `LLM_FALLBACK_BASE_URL` | `https://api.groq.com/openai/v1/` | Fallback OpenAI-compatible base URL. |
+| `LLM_FALLBACK_MODEL` | `openai/gpt-oss-20b` | Fallback model. |
+| `RATE_LIMIT_LEADS_PER_MINUTE` | `20` | Per-IP limit on `POST /leads`; `0` turns it off. |
+| `RATE_LIMIT_AGENT_PER_MINUTE` | `30` | Per-IP limit on the Loan Assist endpoints; `0` turns it off. |
+| `ADMIN_PASSCODE` | empty | When set, the admin page and admin endpoints require it (sent as `X-Admin-Passcode`). Empty leaves them open for local use. |
 
 ## Tests and evals
 
@@ -67,7 +75,7 @@ PostgreSQL must be running (`docker compose up -d db`). Tests run the migrations
 npm test
 ```
 
-There are 103 tests:
+There are 132 tests:
 
 - **Maths:** spec cases 1–3, flooring, the 75% cap, and property tests.
 - **Validation:** 400 errors, including spec cases 4–5.
@@ -75,13 +83,18 @@ There are 103 tests:
 - **Concurrency:** spec case 8, 2 and 10 parallel requests for one mobile number.
 - **Idempotency:** spec case 7, key reuse, and racing retries.
 - **Status workflow:** every illegal transition, and simultaneous decisions.
-- **Gold-rate cache** and the error contract.
+- **Gold-rate cache**, the rate limits and the error contract.
+- **Boundaries:** net equal to gross, the 1000 g limit, mobile first digits, and name length.
+- **Calculator repayment:** the textbook EMI (₹1,00,000 at 12% for 12 months is ₹8,884.88), bullet interest, and a property test against an independent calculation.
+- **Admin passcode:** every admin endpoint returns 401 without it, wrong guesses are rate-limited, and the stats total every lead.
 - **Masking:** mobile numbers are masked in API responses and in the rendered table.
 - **Loan Assist with a scripted fake model:**
   - nothing is filed before the borrower confirms
   - tool errors go back to the model
   - invented numbers and assumed inputs are rejected
   - agent and form leads come out identical
+  - `check_existing_application` only checks a number the borrower typed
+  - the Groq fallback takes over only when Gemini is unavailable
 
 ```bash
 npm run eval
@@ -97,22 +110,24 @@ This runs 7 conversations against the live model and the test database, checking
 6. Prompt injection
 7. Hinglish
 
-Without `LLM_API_KEY`, it prints "Skipped" and exits 0. Expect 15–90 seconds per conversation on the free tier.
+Without an LLM key, it prints "Skipped" and exits 0. Expect 15–90 seconds per conversation on the free tier.
 
-Other checks: `npm run typecheck` and `npm run lint`. For the UI walkthrough, run `npm run screenshot --workspace=@tglobal/web` with the dev server running and `PLAYWRIGHT_BROWSERS_PATH` set to your Playwright browsers.
+Other checks: `npm run typecheck` and `npm run lint`. GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs install, typecheck, lint and all tests against its own PostgreSQL on every push and pull request. For the UI walkthrough, run `npm run screenshot --workspace=@tglobal/web` with the dev server running and `PLAYWRIGHT_BROWSERS_PATH` set to your Playwright browsers.
 
 ## API
 
-Base path: `/api/v1`. Every error has the same shape: `{ "error": { "code", "message", "fields": [{ "field", "message" }] } }`. That includes malformed JSON, unknown routes and 500s, which never include a stack trace. Mobile numbers are always masked (`9876XXXX10`).
+Base path: `/api/v1`. Every error has the same shape: `{ "error": { "code", "message", "fields": [{ "field", "message" }] } }`. That includes malformed JSON, unknown routes, rate limits (`429 RATE_LIMITED` with `Retry-After`) and 500s, which never include a stack trace. Mobile numbers are always masked (`9876XXXX10`).
 
 | Method and path | Purpose |
 | --- | --- |
 | `GET /loan-schemes` | Active plans |
 | `POST /quotes` | Quote for every plan (no database write) |
 | `POST /leads` | Validate, recompute, de-duplicate and store; optional `Idempotency-Key` header |
-| `GET /leads?planId=&limit=&cursor=` | Newest first, masked, cursor pagination |
-| `PATCH /leads/:applicationId/status` | Status workflow step, audited |
-| `GET /leads/:applicationId/audit` | Status history |
+| `POST /repayment-estimates` | Calculator: EMI or bullet repayment for a loan amount on a plan, in exact paise |
+| `GET /leads?planId=&limit=&cursor=` | Admin: newest first, masked, cursor pagination |
+| `GET /leads/stats?planId=` | Admin: count per status and total eligible loans |
+| `PATCH /leads/:applicationId/status` | Admin: status workflow step, audited |
+| `GET /leads/:applicationId/audit` | Admin: status history |
 | `GET /gold-rate` | Cached 24K rate (60 s) |
 | `POST /agent/messages` | Send a message to Loan Assist |
 | `POST /agent/sessions/:sessionId/confirm` | Confirm or cancel the prepared application |
@@ -224,21 +239,21 @@ An illegal move returns `409 INVALID_TRANSITION` with `"from": "UNDER_REVIEW"`, 
 
 ## LLM provider
 
-Loan Assist uses **Gemini 3.5 Flash Lite** (free tier) through Gemini's OpenAI-compatible chat-completions endpoint, called from the API only; the key never reaches the browser. The model sees three tools: `get_loan_schemes`, `calculate_quote` and `submit_application`. Tool arguments are validated with the shared Zod schemas, and the server enforces three guardrails:
+Loan Assist uses **Gemini 3.5 Flash Lite** (free tier), with **Groq `openai/gpt-oss-20b`** as a fallback when Gemini is unavailable. Both are called from the API only, through OpenAI-compatible chat-completions endpoints, so the keys never reach the browser. The model sees four tools: `get_loan_schemes`, `calculate_quote`, `check_existing_application` and `submit_application`. Tool arguments are validated with the shared Zod schemas, and the server enforces three guardrails:
 
 - **No invented numbers.** Every number in a reply must come from a tool result, the borrower or the system prompt. Otherwise the model is asked to rewrite once, and then a fixed safe reply is used.
 - **No assumed inputs.** Weights, karat and mobile number must have been typed by the borrower.
 - **Confirm before filing.** Only the Confirm button files an application.
 
-**To swap providers,** change three variables in `.env`. Any OpenAI-compatible endpoint with tool calling works:
+**To swap providers,** change `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` (or the `LLM_FALLBACK_*` set) in `.env`. Any OpenAI-compatible endpoint with tool calling works:
 
 | Provider | `LLM_BASE_URL` | `LLM_MODEL` (example) |
 | --- | --- | --- |
 | OpenAI | `https://api.openai.com/v1/` | `gpt-4o-mini` |
-| Groq | `https://api.groq.com/openai/v1/` | `llama-3.3-70b-versatile` |
+| Groq | `https://api.groq.com/openai/v1/` | `openai/gpt-oss-20b` |
 | Ollama (local) | `http://localhost:11434/v1/` | `qwen2.5:7b`; set `LLM_API_KEY` to any non-empty value |
 
-Only Gemini has been tested; the other rows are examples. Run `npm run eval` after swapping to check the new model's behaviour.
+Gemini and Groq have been tested; the other rows are examples. Run `npm run eval` after swapping to check the new model's behaviour.
 
 ## Bonuses attempted
 
@@ -248,26 +263,28 @@ Only Gemini has been tested; the other rows are examples. Run `npm run eval` aft
 | Spec case 8: parallel requests give one 201 and one 409 | Done (advisory lock) |
 | Pagination on `GET /leads` | Done (cursor, "Load more") |
 | **B1 Harden the backend:** concurrency-safe duplicate check, Idempotency-Key, status workflow with audit log, cached gold-rate endpoint | Done |
-| **B2 Smarter agent:** prompt-injection tests and tool-status chips | Done |
-| B2: `check_existing_application` tool and streamed replies | Not started |
+| **B2 Smarter agent:** 4th tool `check_existing_application`, prompt-injection tests, tool-status chips | Done |
+| B2: streamed replies | Not started |
 | Agent evals: prompt injection, Hinglish and changing your mind | Done (7 live evals plus scripted tests; not 10+ live) |
 | **B3 AI extras:** appraisal-slip photo extraction, plain-English admin filter | Not started |
-| **B4 Ops ready** | Partial: Compose runs PostgreSQL only. No GitHub Actions, no rate limit, no ARCHITECTURE.md, no demo video. |
+| **B4 Ops ready:** GitHub Actions CI, rate limits on `/leads` and the agent, [ARCHITECTURE.md](ARCHITECTURE.md) | Done |
+| B4: `docker compose up` for the whole app, demo video | Not done: Compose runs PostgreSQL only |
 
 ## Known limitations
 
-- **The admin view has no authentication.** Anyone who can reach the API can list leads and change statuses, and the audit `actor` is a name the admin types.
+- **Admin access is one shared passcode** (`ADMIN_PASSCODE`), not individual logins, and it is off when unset. It is checked on the server in constant time, with 10 wrong tries per IP per 15 minutes. The audit `actor` is a name the admin types.
 - **Loan Assist conversations are kept in API memory** (30-minute idle expiry, 1,000-session cap). A restart ends open chats, and running more than one API instance would need a shared store.
-- **Free-tier latency:** replies take roughly 5–20 seconds and are not streamed. Gemini sometimes returns "high demand" errors, which are retried and then shown as `503 LLM_UNAVAILABLE`.
+- **Free-tier latency:** replies take roughly 5–20 seconds and are not streamed. Gemini sometimes returns "high demand" errors; Groq then answers instead, and only if both fail does the user see `503 LLM_UNAVAILABLE`.
 - **Mobile numbers reach the LLM provider** when the borrower types them in the chat. They are masked in every API response and log.
 - **Idempotency keys never expire,** and only successful `201` responses are stored.
+- **Rate-limit counters are in memory and per IP,** like the chat sessions, so they reset on restart and assume a single API instance.
 - **The gold rate is a mock** (₹7,000/g from config) behind the cache; there is no live feed.
 - **A missing index:** `schema.prisma` declares an index on `LoanScheme.isActive`, but no migration creates it.
 
 ## What I'd do with more time
 
-- Add admin login with roles, so the audit actor comes from the session.
-- Move Loan Assist sessions into PostgreSQL or Redis, stream replies, and add the `check_existing_application` tool.
-- Run tests, lint and evals in GitHub Actions with a PostgreSQL service, and add rate limits on `POST /leads` and the agent.
+- Replace the shared admin passcode with individual logins and roles, so the audit actor comes from the session.
+- Move Loan Assist sessions and rate-limit counters into Redis, and stream replies.
+- Package the API and web app in Docker so `docker compose up` runs everything, and record a demo video.
 - Expire idempotency keys after 24 hours, and add the missing `LoanScheme` index migration.
 - Grow the live eval set past 10 conversations, with a pass threshold, so prompt or model changes are caught in CI.

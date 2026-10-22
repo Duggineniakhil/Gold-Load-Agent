@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { quoteInputFrom, validateDetails, type DetailsForm } from './validation';
+import { quoteInputFrom, validateDetails, validateWeights, type DetailsForm } from './validation';
 
 const valid: DetailsForm = {
   name: 'Ravi Kumar',
@@ -59,5 +59,19 @@ describe('quoteInputFrom', () => {
     });
     expect(quoteInputFrom({ ...valid, grossWeightGrams: '' })).toBeNull();
     expect(quoteInputFrom({ ...valid, netWeightGrams: '52' })).toBeNull();
+  });
+});
+
+describe('validateWeights', () => {
+  it('checks only the weights and karat', () => {
+    expect(validateWeights({ grossWeightGrams: '50', netWeightGrams: '45', karat: 22 })).toEqual(
+      {},
+    );
+    expect(validateWeights({ grossWeightGrams: '50', netWeightGrams: '52', karat: 22 })).toEqual({
+      netWeightGrams: 'Net weight cannot exceed gross weight.',
+    });
+    expect(validateWeights({ grossWeightGrams: '', netWeightGrams: '45', karat: 22 })).toEqual({
+      grossWeightGrams: 'Enter the gross weight in grams.',
+    });
   });
 });

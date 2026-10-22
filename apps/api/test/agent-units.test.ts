@@ -1,6 +1,15 @@
-import { leadRequestSchema, quoteRequestSchema } from '@tglobal/shared';
+import {
+  existingApplicationRequestSchema,
+  leadRequestSchema,
+  quoteRequestSchema,
+} from '@tglobal/shared';
 import { describe, expect, it } from 'vitest';
-import { createOpenAiCompatibleClient, LlmUnavailableError } from '../src/agent/llm-client.js';
+import {
+  createFallbackClient,
+  createOpenAiCompatibleClient,
+  LlmUnavailableError,
+  type LlmClient,
+} from '../src/agent/llm-client.js';
 import { extractNumbers, findUnsupportedNumbers } from '../src/agent/number-guard.js';
 import { toolDefinitions, ungroundedFields } from '../src/agent/tools.js';
 
@@ -79,6 +88,7 @@ describe('tool definitions', () => {
 
   it.each([
     ['calculate_quote', quoteRequestSchema],
+    ['check_existing_application', existingApplicationRequestSchema],
     ['submit_application', leadRequestSchema],
   ] as const)('%s advertises exactly the fields its Zod schema validates', (name, schema) => {
     const zodFields = Object.keys(schema.shape).sort();
@@ -142,11 +152,125 @@ describe('OpenAI-compatible LLM client', () => {
     });
   });
 
+  it('waits as long as Retry-After asks before retrying a 429', async () => {
+    const { llm, requests } = client([
+      new Response('slow down', { status: 429, headers: { 'retry-after': '0.05' } }),
+      new Response(JSON.stringify(okBody), { status: 200 }),
+    ]);
+    const started = Date.now();
+    await llm.complete({ messages: [], tools: [] });
+    expect(requests).toHaveLength(2);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(45);
+  });
+
   it('fails without retrying on a client error, keeping the detail out of the public message', async () => {
     const { llm, requests } = client([new Response('bad key', { status: 401 })]);
     const failure = llm.complete({ messages: [], tools: [] });
     await expect(failure).rejects.toBeInstanceOf(LlmUnavailableError);
     await expect(failure).rejects.toMatchObject({ detail: 'HTTP 401: bad key', statusCode: 503 });
     expect(requests).toHaveLength(1);
+  });
+});
+
+describe('LLM provider fallback', () => {
+  const reply = (content: string): LlmClient => ({
+    complete: async () => ({ role: 'assistant', content }),
+  });
+  const down = (detail: string): LlmClient => ({
+    complete: async () => {
+      throw new LlmUnavailableError(detail);
+    },
+  });
+
+  it('uses the next provider only when the current one is unavailable', async () => {
+    const events: unknown[] = [];
+    const llm = createFallbackClient(
+      [
+        { name: 'gemini', client: down('HTTP 503') },
+        { name: 'groq', client: reply('from groq') },
+      ],
+      (event) => events.push(event),
+    );
+    await expect(llm.complete({ messages: [], tools: [] })).resolves.toMatchObject({
+      content: 'from groq',
+    });
+    expect(events).toEqual([{ from: 'gemini', to: 'groq', detail: 'HTTP 503' }]);
+  });
+
+  it('does not hide programming errors behind a fallback', async () => {
+    const broken: LlmClient = {
+      complete: async () => {
+        throw new TypeError('bug');
+      },
+    };
+    const llm = createFallbackClient([
+      { name: 'gemini', client: broken },
+      { name: 'groq', client: reply('unused') },
+    ]);
+    await expect(llm.complete({ messages: [], tools: [] })).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it('reports the last provider error when every provider is down', async () => {
+    const llm = createFallbackClient([
+      { name: 'gemini', client: down('HTTP 503') },
+      { name: 'groq', client: down('HTTP 429') },
+    ]);
+    await expect(llm.complete({ messages: [], tools: [] })).rejects.toMatchObject({
+      detail: 'HTTP 429',
+    });
+  });
+
+  it('sends and keeps only standard fields for a non-Gemini provider', async () => {
+    const requests: RequestInit[] = [];
+    const llm = createOpenAiCompatibleClient({
+      baseUrl: 'https://llm.test/v1/',
+      apiKey: 'test-key',
+      model: 'fallback-model',
+      timeoutMs: 1000,
+      standardMessages: true,
+      fetch: async (_url, init) => {
+        requests.push(init ?? {});
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: 'assistant',
+                  content: 'ok',
+                  reasoning: 'private chain of thought',
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      },
+    });
+
+    const message = await llm.complete({
+      messages: [
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'c1',
+              type: 'function',
+              function: { name: 'get_loan_schemes', arguments: '{}' },
+              extra_content: { google: { thought_signature: 'sig' } },
+            },
+          ],
+        },
+      ],
+      tools: [],
+    });
+
+    const sent = JSON.parse(String(requests[0]?.body));
+    expect(sent.messages[0].tool_calls[0]).toEqual({
+      id: 'c1',
+      type: 'function',
+      function: { name: 'get_loan_schemes', arguments: '{}' },
+    });
+    expect(message).toEqual({ role: 'assistant', content: 'ok' });
   });
 });

@@ -7,7 +7,8 @@ import pino from 'pino';
 import type { PrismaClient } from '@prisma/client';
 import type { AgentTurnResponse } from '@tglobal/shared';
 import { env } from '../src/config/env.js';
-import { createOpenAiCompatibleClient, type LlmClient } from '../src/agent/llm-client.js';
+import type { LlmClient } from '../src/agent/llm-client.js';
+import { createLlmFromEnv } from '../src/agent/llm-from-env.js';
 import { createLeadRepository } from '../src/repositories/lead-repository.js';
 import { createLoanSchemeRepository } from '../src/repositories/loan-scheme-repository.js';
 import { createAgentService } from '../src/services/agent-service.js';
@@ -172,7 +173,9 @@ async function runCase(evalCase: EvalCase, prisma: PrismaClient, llm: LlmClient)
     llm,
     loanSchemeRepository: createLoanSchemeRepository(prisma),
     leadRepository: createLeadRepository(prisma),
-    goldRate: createGoldRateService({ source: mockGoldRateSource(env.GOLD_RATE_24K_PAISE_PER_GRAM) }),
+    goldRate: createGoldRateService({
+      source: mockGoldRateSource(env.GOLD_RATE_24K_PAISE_PER_GRAM),
+    }),
     logger: pino({ enabled: false }),
   });
 
@@ -206,22 +209,20 @@ async function runCase(evalCase: EvalCase, prisma: PrismaClient, llm: LlmClient)
 }
 
 async function main() {
-  if (!env.LLM_API_KEY) {
+  const llm = createLlmFromEnv(env, pino({ level: 'warn' }));
+  if (!llm) {
     console.log(
-      'Skipped: set LLM_API_KEY in .env to run the Loan Assist evals against a live model.',
+      'Skipped: set LLM_API_KEY (or LLM_FALLBACK_API_KEY) in .env to run the Loan Assist evals against a live model.',
     );
     return;
   }
-
-  const llm = createOpenAiCompatibleClient({
-    baseUrl: env.LLM_BASE_URL,
-    apiKey: env.LLM_API_KEY,
-    model: env.LLM_MODEL,
-    timeoutMs: env.LLM_TIMEOUT_MS,
-  });
   const prisma = await openTestDatabase();
   let failures = 0;
-  console.log(`Loan Assist evals · model ${env.LLM_MODEL}\n`);
+  const models = [
+    env.LLM_API_KEY && env.LLM_MODEL,
+    env.LLM_FALLBACK_API_KEY && env.LLM_FALLBACK_MODEL,
+  ];
+  console.log(`Loan Assist evals · ${models.filter(Boolean).join(', falling back to ')}\n`);
 
   try {
     for (const evalCase of cases) {

@@ -148,3 +148,33 @@ describe('PATCH /api/v1/leads/:applicationId/status', () => {
     ]);
   });
 });
+
+describe('GET /api/v1/leads/stats', () => {
+  it('counts every lead by status and totals the eligible loans, optionally per plan', async () => {
+    const api = app();
+    const first = await fileLead(api, '9000000001');
+    await fileLead(api, '9000000002');
+    await request(api)
+      .post('/api/v1/leads')
+      .send({
+        name: 'Asha Rao',
+        mobileNumber: '9000000003',
+        grossWeightGrams: 12,
+        netWeightGrams: 10,
+        karat: 18,
+        planId: 'PLAN_BULLET_01',
+      })
+      .expect(201);
+    await move(api, first, 'UNDER_REVIEW').expect(200);
+
+    const all = await request(api).get('/api/v1/leads/stats').expect(200);
+    expect(all.body).toEqual({
+      total: 3,
+      byStatus: { SUBMITTED: 2, UNDER_REVIEW: 1, APPROVED: 0, REJECTED: 0 },
+      totalEligibleLoanPaise: 21656200 * 2 + 3675000,
+    });
+
+    const emi = await request(api).get('/api/v1/leads/stats?planId=PLAN_EMI_01').expect(200);
+    expect(emi.body).toMatchObject({ total: 2, totalEligibleLoanPaise: 21656200 * 2 });
+  });
+});

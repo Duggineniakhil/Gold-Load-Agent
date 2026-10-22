@@ -7,7 +7,8 @@ import { Icon } from './ui';
 const links = [
   { to: '/', label: 'Home', end: true },
   { to: '/apply', label: 'Apply' },
-  { to: '/leads', label: 'Lead register' },
+  { to: '/calculator', label: 'Calculator' },
+  { to: '/admin', label: 'Admin' },
   { to: '/#how-it-works', label: 'How it works' },
   { to: '/#faq', label: 'FAQ' },
 ];
@@ -116,7 +117,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <nav aria-label="Footer">
             <Link to="/apply">Apply</Link>
-            <Link to="/leads">Lead register</Link>
+            <Link to="/calculator">Calculator</Link>
+            <Link to="/admin">Admin</Link>
             <Link to="/#faq">FAQ</Link>
           </nav>
           <p className="footer__note">
