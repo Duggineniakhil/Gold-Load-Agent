@@ -7,14 +7,53 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum RepaymentType {
+  BULLET
+  EMI
+}
+
+enum LeadStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
 model LoanScheme {
-  id                   String   @id
-  name                 String
-  annualInterestRate   Decimal  @db.Decimal(5, 2)
-  maxLtv               Decimal  @db.Decimal(4, 3)
-  tenureMonths         Int
-  repaymentType        String
-  active               Boolean  @default(true)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                 String        @id
+  name               String
+  repaymentType      RepaymentType
+  annualInterestBps  Int
+  tenureMonths       Int
+  maxLtvBps           Int
+  isActive            Boolean       @default(true)
+  leads               Lead[]
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  @@index([isActive])
+}
+
+model Lead {
+  id                    String     @id @default(uuid()) @db.Uuid
+  applicationId         String     @unique @default(dbgenerated("('GL-'::text || nextval('lead_application_seq'::regclass)::text)"))
+  name                  String
+  mobileNumber          String
+  grossWeightMg         Int
+  netWeightMg           Int
+  karat                 Int
+  schemeId              String
+  scheme                LoanScheme @relation(fields: [schemeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  goldRatePaisePerGram  BigInt
+  pureGoldMg            Int
+  goldValuePaise        BigInt
+  eligibleLoanPaise     BigInt
+  ltvAppliedBps         Int
+  status                LeadStatus @default(SUBMITTED)
+  idempotencyKey        String?    @unique
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  @@index([mobileNumber, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
 }

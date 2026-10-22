@@ -1,5 +1,9 @@
-import 'dotenv/config';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 import { z } from 'zod';
+
+dotenv.config({ path: resolve(fileURLToPath(new URL('../../../../.env', import.meta.url))) });
 
 const envSchema = z.object({
   DATABASE_URL: z.string().url().default('postgresql://postgres:postgres@localhost:5432/tglobal'),

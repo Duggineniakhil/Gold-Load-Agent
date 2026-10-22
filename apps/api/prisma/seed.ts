@@ -1,24 +1,27 @@
 import { PrismaClient } from '@prisma/client';
+import { env } from '../src/config/env.js';
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({ datasourceUrl: env.DATABASE_URL });
 
 async function main() {
   const schemes = [
     {
       id: 'PLAN_BULLET_01',
       name: 'Bullet Repayment',
-      annualInterestRate: '12.00',
-      maxLtv: '0.700',
+      annualInterestBps: 1200,
+      maxLtvBps: 7000,
       tenureMonths: 12,
       repaymentType: 'BULLET',
+      isActive: true,
     },
     {
       id: 'PLAN_EMI_01',
       name: 'Monthly EMI',
-      annualInterestRate: '10.50',
-      maxLtv: '0.750',
+      annualInterestBps: 1050,
+      maxLtvBps: 7500,
       tenureMonths: 12,
       repaymentType: 'EMI',
+      isActive: true,
     },
   ];
 
