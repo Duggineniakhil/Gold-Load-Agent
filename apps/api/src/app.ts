@@ -44,9 +44,14 @@ export type AppDependencies = {
   agent?: AgentService | undefined;
   llm?: LlmClient | undefined;
   logger?: Logger;
-  /** Per-IP limits; omitted (as in most tests) means no limit. */
   /** When set, the admin endpoints require it in the X-Admin-Passcode header. */
   adminPasscode?: string | undefined;
+  /**
+   * Number of proxies in front of the API whose X-Forwarded-For entries are trusted.
+   * 0 uses the socket address; behind proxies that would make every client share one limit.
+   */
+  trustProxyHops?: number | undefined;
+  /** Per-IP limits; omitted (as in most tests) means no limit. */
   rateLimits?: { leads?: RateLimitOptions | undefined; agent?: RateLimitOptions | undefined };
 };
 
@@ -105,6 +110,7 @@ function replyChunks(text: string, size = 24): string[] {
 
 export function createApp(deps: AppDependencies) {
   const app = express();
+  app.set('trust proxy', deps.trustProxyHops ?? 0);
   const noLimit: RequestHandler = (_request, _response, next) => next();
   const limitLeads = deps.rateLimits?.leads ? createRateLimiter(deps.rateLimits.leads) : noLimit;
   const requireAdmin = createAdminGuard(deps.adminPasscode);

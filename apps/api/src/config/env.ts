@@ -22,6 +22,8 @@ const envSchema = z.object({
   LLM_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   /** Passcode for the admin endpoints (X-Admin-Passcode); empty leaves them open. */
   ADMIN_PASSCODE: z.string().default(''),
+  /** Proxies in front of the API (nginx, Vercel, Render...) so per-IP limits see the real client. */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
   /** Requests per minute per IP; 0 turns the limit off. */
   RATE_LIMIT_LEADS_PER_MINUTE: z.coerce.number().int().min(0).default(20),
   RATE_LIMIT_AGENT_PER_MINUTE: z.coerce.number().int().min(0).default(30),

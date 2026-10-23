@@ -30,6 +30,7 @@ const app = createApp({
   agent,
   llm,
   adminPasscode: env.ADMIN_PASSCODE,
+  trustProxyHops: env.TRUST_PROXY_HOPS,
   rateLimits: {
     leads: perMinute(env.RATE_LIMIT_LEADS_PER_MINUTE),
     agent: perMinute(env.RATE_LIMIT_AGENT_PER_MINUTE),

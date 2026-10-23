@@ -61,6 +61,12 @@ The pages are `/` (home), `/apply` (3-step application), `/calculator` (loan and
 - **Port 5432 already in use** (for example by a local PostgreSQL)? Set `POSTGRES_PORT=5433` in `.env` and change the port in `DATABASE_URL` and `TEST_DATABASE_URL` to match.
 - The test database `tglobal_test` is created by `docker/postgres-init` the first time the volume starts. If you had an older volume, recreate it with `docker compose down -v`.
 
+### Deploying (Vercel + a Node host)
+
+The API keeps chat sessions in memory and streams long replies, so it runs as one long-lived process (for example Render, using `docker/api.Dockerfile`, which applies migrations and seeds plans on start) with a hosted PostgreSQL database. Set the variables below on the API host, with `TRUST_PROXY_HOPS=2` (Vercel, then the host's own proxy) and a non-empty `ADMIN_PASSCODE`.
+
+The web app goes on Vercel from the repo root. `vercel.json` builds `apps/web` and forwards `/api/*` to the API: replace `YOUR-API-HOST` with the API's address before deploying. Vercel needs no environment variables, because no key reaches the browser.
+
 ## Environment variables
 
 | Variable                       | Default                                                      | Purpose                                                                                                                        |
@@ -81,6 +87,7 @@ The pages are `/` (home), `/apply` (3-step application), `/calculator` (loan and
 | `RATE_LIMIT_LEADS_PER_MINUTE`  | `20`                                                         | Per-IP limit on `POST /leads`; `0` turns it off.                                                                               |
 | `RATE_LIMIT_AGENT_PER_MINUTE`  | `30`                                                         | Per-IP limit on the Loan Assist endpoints; `0` turns it off.                                                                   |
 | `ADMIN_PASSCODE`               | empty                                                        | When set, the admin page and admin endpoints require it (sent as `X-Admin-Passcode`). Empty leaves them open for local use.    |
+| `TRUST_PROXY_HOPS`             | `0`                                                          | Proxies in front of the API whose `X-Forwarded-For` is trusted, so per-IP limits see the real client. Docker Compose sets `1`. |
 
 ## Tests and evals
 
@@ -339,7 +346,6 @@ Gemini and Groq have been tested; the other rows are examples. Run `npm run eval
 - **Loan Assist conversations are kept in API memory** (30-minute idle expiry, 1,000-session cap). A restart ends open chats, and running more than one API instance would need a shared store.
 - **Free-tier latency:** replies take roughly 5–20 seconds. Gemini sometimes returns "high demand" errors; Groq then answers instead, and only if both fail does the user see `503 LLM_UNAVAILABLE`.
 - **Streaming starts after the reply is complete.** The server waits for the full, number-checked reply and then streams it in chunks, so the first words do not arrive sooner; the trade-off keeps unverified figures from ever being shown.
-- **Rate limits behind the Docker proxy:** Express is not configured to trust Nginx's `X-Forwarded-For`, so under `docker compose up` every request appears to come from the Nginx container and all users share one per-IP limit (including the admin passcode lockout). Local `npm run dev` is not affected. The fix is a `trust proxy` setting enabled only in Docker.
 - **Appraisal-slip extraction** depends on the model reading images: it has been tested with a scripted model, not yet with real slip photos, and the Groq fallback model cannot read images.
 - **Mobile numbers reach the LLM provider** when the borrower types them in the chat. They are masked in every API response and log.
 - **Idempotency keys never expire,** and only successful `201` responses are stored.
@@ -350,7 +356,7 @@ Gemini and Groq have been tested; the other rows are examples. Run `npm run eval
 ## What I'd do with more time
 
 - Replace the shared admin passcode with individual logins and roles, so the audit actor comes from the session.
-- Move Loan Assist sessions and rate-limit counters into Redis, and trust the Docker proxy so per-IP limits work behind Nginx.
+- Move Loan Assist sessions and rate-limit counters into Redis.
 - Stream tokens as the model writes them, checking figures as they arrive, and record a demo video.
 - Try slip extraction on real appraisal-slip photos and add an image-capable fallback model.
 - Expire idempotency keys after 24 hours, and add the missing `LoanScheme` index migration.

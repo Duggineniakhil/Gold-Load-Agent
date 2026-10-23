@@ -5,13 +5,17 @@ import { createApp } from '../src/app.js';
 import type { RateLimitOptions } from '../src/rate-limit.js';
 import { fakeLeadRepository, fixedGoldRate, seededSchemes } from './helpers/fixtures.js';
 
-function makeApp(rateLimits: { leads?: RateLimitOptions; agent?: RateLimitOptions }) {
+function makeApp(
+  rateLimits: { leads?: RateLimitOptions; agent?: RateLimitOptions },
+  trustProxyHops?: number,
+) {
   return createApp({
     loanSchemeRepository: { findActive: async () => seededSchemes },
     leadRepository: fakeLeadRepository(),
     goldRate: fixedGoldRate(),
     logger: pino({ enabled: false }),
     rateLimits,
+    trustProxyHops,
   });
 }
 
@@ -57,5 +61,24 @@ describe('rate limits', () => {
     await request(app).post('/api/v1/agent/messages').send({ message: 'Hi' }).expect(503);
     await request(app).post('/api/v1/agent/messages').send({ message: 'Hi' }).expect(429);
     await postLead(app).expect(400);
+  });
+
+  it('behind trusted proxies, limits each client by its forwarded address', async () => {
+    const app = makeApp({ leads: { max: 1, windowMs: 60_000 } }, 1);
+    const from = (client: string) =>
+      request(app).post('/api/v1/leads').set('X-Forwarded-For', client).send({});
+
+    await from('203.0.113.1').expect(400);
+    await from('203.0.113.2').expect(400);
+    await from('203.0.113.1').expect(429);
+  });
+
+  it('ignores X-Forwarded-For when no proxy is trusted, so clients cannot dodge the limit', async () => {
+    const app = makeApp({ leads: { max: 1, windowMs: 60_000 } });
+    const from = (client: string) =>
+      request(app).post('/api/v1/leads').set('X-Forwarded-For', client).send({});
+
+    await from('203.0.113.1').expect(400);
+    await from('203.0.113.2').expect(429);
   });
 });
